@@ -95,8 +95,23 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
   // TODO: validate fields and return BUN_MALFORMED or BUN_UNSUPPORTED
   // as required by the spec. The magic check is a good place to start.
 
+  // Magic Check
   if (header->magic != BUN_MAGIC) {
     return BUN_MALFORMED;
+  }
+
+  // ADDED: more basic validations (offset, version)
+  // Offset Check
+  if (header->asset_table_offset % 4 != 0
+    || header->string_table_offset % 4 != 0
+    || header->data_section_offset % 4 != 0) {
+    return BUN_MALFORMED
+  }
+
+  // Version Check
+  if (header->version_major != 1
+    || header->version_minor != 0) {
+    return BUN_UNSUPPORTED;
   }
 
   return BUN_OK;
