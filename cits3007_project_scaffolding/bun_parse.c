@@ -105,7 +105,7 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
   if (header->asset_table_offset % 4 != 0
     || header->string_table_offset % 4 != 0
     || header->data_section_offset % 4 != 0) {
-    return BUN_MALFORMED
+    return BUN_MALFORMED;
   }
 
   // Version Check
