@@ -3,10 +3,12 @@
   Group Number: 19
   Names & Student Numbers:
  *  Nicolas Hasleby (24314307) - GitHub: nicHaslb3
- *  Nick Alexander (24328931) - GitHub: 
+ *  Nick Alexander (24328931) - GitHub: oMakaron
  *  Jason Yulfan (24078797) - GitHub: Jayshira
  *  Feiyue	Zhang (23734789) - GitHub: Feiyue222 
  *  Dan Cosh (23362209) - GitHub: DanCosh701
+ 
+
  
 ## Communication Plan
 - Primary Channel: Discord for quick text.
