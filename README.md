@@ -3,7 +3,7 @@
   Group Number: 19
   Names & Student Numbers:
  *  Nicolas Hasleby (24314307) - GitHub: nicHaslb3
- *  Nick Alexander (24328931) - GitHub: idk
+ *  Nick Alexander (24328931) - GitHub: 
  *  Jason Yulfan (24078797) - GitHub: Jayshira
  *  Feiyue	Zhang (23734789) - GitHub: Feiyue222 
  *  Dan Cosh (23362209) - GitHub: DanCosh701
@@ -28,13 +28,10 @@ Every session - always get the current version of main:
 
 ### When finished coding session locally 
 - git push origin [your-branch] 
- <!--dont let it sit on your computer!-->
 
 ### Pushing to main 
  - push to your branch
  - Go to github and make a pull request.
- <!--Try your best to get someone else to read and thumbs up your addition before finally merging.--> 
- <!--run tests to ensure functionally of main is maintained, and run tests before pushing.--> 
 
 ## Phase 1 
 
