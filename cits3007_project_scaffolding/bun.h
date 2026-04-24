@@ -15,6 +15,8 @@ typedef enum {
     BUN_ERR_IO      = 3,   /* I/O error or file not found -- you may define
                               additional codes in the range 3-10 as needed;
                               document them in your report */
+    BUN_ERR_INT_OVERFLOW = 4, /* arithmetic overflow while validating
+                                 on-disk metadata */
 } bun_result_t;
 
 //
@@ -101,6 +103,10 @@ typedef struct {
     long    file_size;      // total file size in bytes
     BunParsedAsset *assets; // parsed asset previews, one per successfully read asset
     u32 parsed_asset_count; // number of assets safely captured in `assets`
+    bun_result_t last_error_code;  // most recent non-OK parser result
+    const char *error_detail;      // static explanation for `last_error_code`
+    u64 error_offset;              // byte offset relevant to the last error
+    int error_offset_valid;        // whether `error_offset` is meaningful
 } BunParseContext;
 
 //
@@ -133,13 +139,15 @@ bun_result_t bun_open(const char *path, BunParseContext *ctx);
 
 /**
  * Parse and validate the BUN header from ctx->file, populating *header.
- * Returns BUN_OK, BUN_MALFORMED, or BUN_UNSUPPORTED.
+ * Returns BUN_OK, BUN_MALFORMED, BUN_UNSUPPORTED, or BUN_ERR_IO.
  */
 bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header);
 
 /**
  * Parse and validate all asset records. Called after bun_parse_header().
- * Returns BUN_OK, BUN_MALFORMED, or BUN_UNSUPPORTED.
+ * Returns BUN_OK, BUN_MALFORMED, BUN_UNSUPPORTED, BUN_ERR_IO, or
+ * BUN_ERR_INT_OVERFLOW. On failure, ctx contains a short diagnostic message
+ * and, where available, the relevant byte offset.
  *
  * You will probably want to extend this signature -- for instance, to pass
  * in the header (needed for offset calculations) or to return the parsed

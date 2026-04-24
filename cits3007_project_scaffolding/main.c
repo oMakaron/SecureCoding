@@ -3,6 +3,37 @@
 
 #include "bun.h"
 
+static const char *result_summary(bun_result_t result) {
+  switch (result) {
+    case BUN_MALFORMED:
+      return "malformed BUN file";
+    case BUN_UNSUPPORTED:
+      return "unsupported BUN feature";
+    case BUN_ERR_IO:
+      return "I/O or runtime failure";
+    case BUN_ERR_INT_OVERFLOW:
+      return "integer overflow while validating metadata";
+    case BUN_OK:
+    default:
+      return "no error";
+  }
+}
+
+static void print_parser_error(FILE *stream,
+                               bun_result_t result,
+                               const BunParseContext *ctx) {
+  fprintf(stream, "Error: %s", result_summary(result));
+  if (ctx->error_detail != NULL) {
+    fprintf(stream, ": %s", ctx->error_detail);
+  }
+  if (ctx->error_offset_valid) {
+    fprintf(stream,
+            " (byte offset %llu)",
+            (unsigned long long)ctx->error_offset);
+  }
+  fputc('\n', stream);
+}
+
 static int byte_is_text(u8 byte) {
   return (byte >= 0x20 && byte <= 0x7e)
       || byte == '\n'
@@ -134,9 +165,7 @@ int main(int argc, char *argv[]) {
 
   result = bun_parse_header(&ctx, &header);
   if (result != BUN_OK) {
-    // bun_parse_header returns a code; printing the specifics is up to
-    // you -- you may want to extend the API to return error details
-    fprintf(stderr, "Error: header invalid or unsupported (code %d)\n", result);
+    print_parser_error(stderr, result, &ctx);
     bun_close(&ctx);
     return result;
   }
@@ -148,12 +177,8 @@ int main(int argc, char *argv[]) {
     print_asset_summary(&ctx.assets[idx], idx);
   }
 
-  if (result == BUN_MALFORMED) {
-    fprintf(stderr, "Error: file is malformed\n");
-  } else if (result == BUN_UNSUPPORTED) {
-    fprintf(stderr, "Error: file uses unsupported features\n");
-  } else if (result == BUN_ERR_IO) {
-    fprintf(stderr, "Error: an I/O error occurred while reading asset data\n");
+  if (result != BUN_OK) {
+    print_parser_error(stderr, result, &ctx);
   }
 
   bun_close(&ctx);
