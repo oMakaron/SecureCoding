@@ -73,6 +73,19 @@ typedef struct {
 
 #define BUN_HEADER_SIZE       60
 #define BUN_ASSET_RECORD_SIZE 48
+#define BUN_NAME_PREFIX_MAX   60u
+#define BUN_DATA_PREFIX_MAX   60u
+
+typedef struct {
+    BunAssetRecord record;
+    char name_prefix[BUN_NAME_PREFIX_MAX + 1u];
+    u32  name_prefix_length;
+    u8   data_prefix[BUN_DATA_PREFIX_MAX];
+    u64  data_prefix_size;
+    int  name_truncated;
+    int  data_truncated;
+    int  data_prefix_is_decompressed;
+} BunParsedAsset;
 
 //
 // Parse context
@@ -86,7 +99,8 @@ typedef struct {
 typedef struct {
     FILE   *file;           // open file handle
     long    file_size;      // total file size in bytes
-    // add further fields here as needed
+    BunParsedAsset *assets; // parsed asset previews, one per successfully read asset
+    u32 parsed_asset_count; // number of assets safely captured in `assets`
 } BunParseContext;
 
 //
