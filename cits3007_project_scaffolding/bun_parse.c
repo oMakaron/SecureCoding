@@ -39,6 +39,68 @@ typedef struct {
   u64 size;
 } BunSection;
 
+enum {
+  BUN_HEADER_MAGIC_OFFSET = 0u,
+  BUN_HEADER_VERSION_MAJOR_OFFSET = 4u,
+  BUN_HEADER_VERSION_MINOR_OFFSET = 6u,
+  BUN_HEADER_ASSET_COUNT_OFFSET = 8u,
+  BUN_HEADER_ASSET_TABLE_OFFSET = 12u,
+  BUN_HEADER_STRING_TABLE_OFFSET = 20u,
+  BUN_HEADER_STRING_TABLE_SIZE_OFFSET = 28u,
+  BUN_HEADER_DATA_SECTION_OFFSET = 36u,
+  BUN_HEADER_DATA_SECTION_SIZE_OFFSET = 44u,
+  BUN_RECORD_NAME_OFFSET_OFFSET = 0u,
+  BUN_RECORD_NAME_LENGTH_OFFSET = 4u,
+  BUN_RECORD_DATA_OFFSET_OFFSET = 8u,
+  BUN_RECORD_DATA_SIZE_OFFSET = 16u,
+  BUN_RECORD_UNCOMPRESSED_SIZE_OFFSET = 24u,
+  BUN_RECORD_COMPRESSION_OFFSET = 32u,
+  BUN_RECORD_CHECKSUM_OFFSET = 40u,
+  BUN_RECORD_FLAGS_OFFSET = 44u
+};
+
+static void clear_error_state(BunParseContext *ctx) {
+  ctx->last_error_code = BUN_OK;
+  ctx->error_detail = NULL;
+  ctx->error_offset = 0;
+  ctx->error_offset_valid = 0;
+}
+
+static bun_result_t fail_with(BunParseContext *ctx,
+                              bun_result_t code,
+                              const char *detail) {
+  ctx->last_error_code = code;
+  ctx->error_detail = detail;
+  ctx->error_offset = 0;
+  ctx->error_offset_valid = 0;
+  return code;
+}
+
+static bun_result_t fail_at(BunParseContext *ctx,
+                            bun_result_t code,
+                            const char *detail,
+                            u64 offset) {
+  ctx->last_error_code = code;
+  ctx->error_detail = detail;
+  ctx->error_offset = offset;
+  ctx->error_offset_valid = 1;
+  return code;
+}
+
+static void note_first_issue(const char **detail,
+                             u64 *offset,
+                             int *offset_valid,
+                             const char *candidate_detail,
+                             u64 candidate_offset) {
+  if (*detail != NULL) {
+    return;
+  }
+
+  *detail = candidate_detail;
+  *offset = candidate_offset;
+  *offset_valid = 1;
+}
+
 /*
  * Keep arithmetic helpers small and explicit so every offset/size calculation
  * is checked before it is used in fseek()/fread().
@@ -129,26 +191,70 @@ static int read_asset_record(FILE *file, u64 offset, BunAssetRecord *record) {
   return 1;
 }
 
+static void reset_parsed_assets(BunParseContext *ctx) {
+  free(ctx->assets);
+  ctx->assets = NULL;
+  ctx->parsed_asset_count = 0;
+}
+
+static bun_result_t allocate_parsed_assets(BunParseContext *ctx, u32 asset_count) {
+  u64 bytes_needed = 0;
+
+  if (asset_count == 0u) {
+    return BUN_OK;
+  }
+  if (!mul_u64_checked((u64)asset_count,
+                       (u64)sizeof(*ctx->assets),
+                       &bytes_needed)) {
+    return fail_at(ctx,
+                   BUN_ERR_INT_OVERFLOW,
+                   "parsed asset allocation size overflows 64-bit arithmetic",
+                   BUN_HEADER_ASSET_COUNT_OFFSET);
+  }
+  if (bytes_needed > (u64)SIZE_MAX) {
+    return fail_at(ctx,
+                   BUN_ERR_INT_OVERFLOW,
+                   "parsed asset allocation size exceeds size_t",
+                   BUN_HEADER_ASSET_COUNT_OFFSET);
+  }
+
+  ctx->assets = calloc((size_t)asset_count, sizeof(*ctx->assets));
+  return ctx->assets != NULL
+       ? BUN_OK
+       : fail_with(ctx, BUN_ERR_IO, "failed to allocate parsed asset table");
+}
+
 /*
  * Asset names are required to be non-empty printable ASCII stored inside the
  * string table. Validate them by streaming a small chunk at a time.
  */
 static bun_result_t validate_asset_name(BunParseContext *ctx,
                                         const BunHeader *header,
-                                        const BunAssetRecord *record) {
+                                        const BunAssetRecord *record,
+                                        u64 record_offset,
+                                        BunParsedAsset *parsed) {
   u8  buf[256];
   u64 remaining = (u64)record->name_length;
   u64 offset = 0;
   u64 name_start = 0;
+  u32 prefix_len = 0;
 
   if (record->name_length == 0) {
-    return BUN_MALFORMED;
+    return fail_at(ctx,
+                   BUN_MALFORMED,
+                   "asset name length must be non-zero",
+                   record_offset + BUN_RECORD_NAME_LENGTH_OFFSET);
   }
+
+  parsed->name_truncated = record->name_length > BUN_NAME_PREFIX_MAX;
 
   if (!add_u64_checked(header->string_table_offset,
                        (u64)record->name_offset,
                        &name_start)) {
-    return BUN_MALFORMED;
+    return fail_at(ctx,
+                   BUN_ERR_INT_OVERFLOW,
+                   "asset name start offset overflows 64-bit arithmetic",
+                   record_offset + BUN_RECORD_NAME_OFFSET_OFFSET);
   }
 
   while (remaining > 0) {
@@ -157,18 +263,33 @@ static bun_result_t validate_asset_name(BunParseContext *ctx,
     u64 chunk_start = 0;
 
     if (!add_u64_checked(name_start, offset, &chunk_start)) {
-      return BUN_MALFORMED;
+      return fail_at(ctx,
+                     BUN_ERR_INT_OVERFLOW,
+                     "asset name read offset overflows 64-bit arithmetic",
+                     record_offset + BUN_RECORD_NAME_OFFSET_OFFSET);
     }
     if (!seek_to_u64(ctx->file, chunk_start)) {
-      return BUN_ERR_IO;
+      return fail_at(ctx,
+                     BUN_ERR_IO,
+                     "failed to seek to asset name bytes",
+                     chunk_start);
     }
     if (!read_exact(ctx->file, buf, chunk)) {
-      return BUN_ERR_IO;
+      return fail_at(ctx,
+                     BUN_ERR_IO,
+                     "failed to read asset name bytes",
+                     chunk_start);
     }
 
     for (idx = 0; idx < chunk; idx++) {
       if (buf[idx] < 0x20 || buf[idx] > 0x7e) {
-        return BUN_MALFORMED;
+        return fail_at(ctx,
+                       BUN_MALFORMED,
+                       "asset name contains non-printable ASCII bytes",
+                       chunk_start + (u64)idx);
+      }
+      if (prefix_len < BUN_NAME_PREFIX_MAX) {
+        parsed->name_prefix[prefix_len++] = (char)buf[idx];
       }
     }
 
@@ -176,33 +297,100 @@ static bun_result_t validate_asset_name(BunParseContext *ctx,
     offset += chunk;
   }
 
+  parsed->name_prefix[prefix_len] = '\0';
+  parsed->name_prefix_length = prefix_len;
+  return BUN_OK;
+}
+
+/*
+ * For uncompressed or unsupported asset formats, capture a small raw prefix so
+ * main.c can still display useful context without loading the whole payload.
+ */
+static bun_result_t capture_raw_data_preview(BunParseContext *ctx,
+                                             const BunHeader *header,
+                                             const BunAssetRecord *record,
+                                             u64 record_offset,
+                                             BunParsedAsset *parsed) {
+  u64 data_start = 0;
+  size_t preview_size = 0;
+
+  parsed->data_prefix_is_decompressed = 0;
+  parsed->data_prefix_size = 0;
+  parsed->data_truncated = record->data_size > BUN_DATA_PREFIX_MAX;
+
+  if (record->data_size == 0u) {
+    return BUN_OK;
+  }
+  if (!add_u64_checked(header->data_section_offset,
+                       record->data_offset,
+                       &data_start)) {
+    return fail_at(ctx,
+                   BUN_ERR_INT_OVERFLOW,
+                   "asset data start offset overflows 64-bit arithmetic",
+                   record_offset + BUN_RECORD_DATA_OFFSET_OFFSET);
+  }
+
+  preview_size = record->data_size < BUN_DATA_PREFIX_MAX
+               ? (size_t)record->data_size
+               : (size_t)BUN_DATA_PREFIX_MAX;
+
+  if (!seek_to_u64(ctx->file, data_start)) {
+    return fail_at(ctx,
+                   BUN_ERR_IO,
+                   "failed to seek to asset data bytes",
+                   data_start);
+  }
+  if (!read_exact(ctx->file, parsed->data_prefix, preview_size)) {
+    return fail_at(ctx,
+                   BUN_ERR_IO,
+                   "failed to read asset data preview",
+                   data_start);
+  }
+
+  parsed->data_prefix_size = preview_size;
   return BUN_OK;
 }
 
 /*
  * RLE validation is done without allocating an output buffer. This keeps the
- * parser's memory use sub-linear even for large data sections.
+ * parser's memory use sub-linear even for large data sections, while still
+ * preserving a short uncompressed preview for display.
  */
 static bun_result_t validate_rle_data(BunParseContext *ctx,
                                       const BunHeader *header,
-                                      const BunAssetRecord *record) {
+                                      const BunAssetRecord *record,
+                                      u64 record_offset,
+                                      BunParsedAsset *parsed) {
   u8  buf[512];
   u64 remaining = record->data_size;
   u64 data_start = 0;
   u64 expanded_size = 0;
 
+  parsed->data_prefix_is_decompressed = 1;
+  parsed->data_prefix_size = 0;
+  parsed->data_truncated = 0;
+
   if ((record->data_size % 2u) != 0u) {
-    return BUN_MALFORMED;
+    return fail_at(ctx,
+                   BUN_MALFORMED,
+                   "RLE asset data size must be even",
+                   record_offset + BUN_RECORD_DATA_SIZE_OFFSET);
   }
 
   if (!add_u64_checked(header->data_section_offset,
                        record->data_offset,
                        &data_start)) {
-    return BUN_MALFORMED;
+    return fail_at(ctx,
+                   BUN_ERR_INT_OVERFLOW,
+                   "RLE asset data start offset overflows 64-bit arithmetic",
+                   record_offset + BUN_RECORD_DATA_OFFSET_OFFSET);
   }
 
   if (!seek_to_u64(ctx->file, data_start)) {
-    return BUN_ERR_IO;
+    return fail_at(ctx,
+                   BUN_ERR_IO,
+                   "failed to seek to RLE asset data",
+                   data_start);
   }
 
   while (remaining > 0) {
@@ -210,26 +398,54 @@ static bun_result_t validate_rle_data(BunParseContext *ctx,
     size_t idx = 0;
 
     if (!read_exact(ctx->file, buf, chunk)) {
-      return BUN_ERR_IO;
+      return fail_at(ctx,
+                     BUN_ERR_IO,
+                     "failed to read RLE asset data",
+                     data_start + (record->data_size - remaining));
     }
 
     for (idx = 0; idx < chunk; idx += 2) {
       u8 count = buf[idx];
+      u8 value = buf[idx + 1];
+      size_t copies_to_store = 0;
 
       if (count == 0) {
-        return BUN_MALFORMED;
+        return fail_at(ctx,
+                       BUN_MALFORMED,
+                       "RLE run length must be non-zero",
+                       data_start + (record->data_size - remaining) + (u64)idx);
       }
       if (!add_u64_checked(expanded_size, (u64)count, &expanded_size)) {
-        return BUN_MALFORMED;
+        return fail_at(ctx,
+                       BUN_ERR_INT_OVERFLOW,
+                       "RLE expanded size overflows 64-bit arithmetic",
+                       record_offset + BUN_RECORD_UNCOMPRESSED_SIZE_OFFSET);
+      }
+
+      if (parsed->data_prefix_size < BUN_DATA_PREFIX_MAX) {
+        copies_to_store = (size_t)(BUN_DATA_PREFIX_MAX - parsed->data_prefix_size);
+        if (copies_to_store > count) {
+          copies_to_store = count;
+        }
+
+        memset(parsed->data_prefix + parsed->data_prefix_size,
+               value,
+               copies_to_store);
+        parsed->data_prefix_size += copies_to_store;
       }
     }
 
     remaining -= chunk;
   }
 
+  parsed->data_truncated = expanded_size > BUN_DATA_PREFIX_MAX;
+
   return expanded_size == record->uncompressed_size
        ? BUN_OK
-       : BUN_MALFORMED;
+       : fail_at(ctx,
+                 BUN_MALFORMED,
+                 "RLE expanded size does not match uncompressed_size",
+                 record_offset + BUN_RECORD_UNCOMPRESSED_SIZE_OFFSET);
 }
 
 //
@@ -240,19 +456,23 @@ bun_result_t bun_open(const char *path, BunParseContext *ctx) {
   // we open the file; seek to the end, to get the size; then jump back to the
   // beginning, ready to start parsing.
 
+  clear_error_state(ctx);
+  reset_parsed_assets(ctx);
   ctx->file = fopen(path, "rb");
   if (!ctx->file) {
-    return BUN_ERR_IO;
+    return fail_with(ctx, BUN_ERR_IO, "could not open input file");
   }
 
   if (fseek(ctx->file, 0, SEEK_END) != 0) {
     fclose(ctx->file);
-    return BUN_ERR_IO;
+    ctx->file = NULL;
+    return fail_with(ctx, BUN_ERR_IO, "could not seek to end of input file");
   }
   ctx->file_size = ftell(ctx->file);
   if (ctx->file_size < 0) {
     fclose(ctx->file);
-    return BUN_ERR_IO;
+    ctx->file = NULL;
+    return fail_with(ctx, BUN_ERR_IO, "could not determine input file size");
   }
   rewind(ctx->file);
 
@@ -262,17 +482,22 @@ bun_result_t bun_open(const char *path, BunParseContext *ctx) {
 bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
   u8 buf[BUN_HEADER_SIZE];
 
+  clear_error_state(ctx);
+
   // our file is far too short, and cannot be valid!
   // (query: how do we let `main` know that "file was too short"
   // was the exact problem? Where can we put details about the
   // exact validation problem that occurred?)
   if (ctx->file_size < (long)BUN_HEADER_SIZE) {
-    return BUN_MALFORMED;
+    return fail_at(ctx,
+                   BUN_MALFORMED,
+                   "file ends before the full BUN header",
+                   ctx_file_size_u64(ctx));
   }
 
   // slurp the header into `buf`
   if (fread(buf, 1, BUN_HEADER_SIZE, ctx->file) != BUN_HEADER_SIZE) {
-    return BUN_ERR_IO;
+    return fail_at(ctx, BUN_ERR_IO, "failed to read BUN header", 0u);
   }
 
   // Decode the fixed-size header directly from the on-disk byte buffer.
@@ -289,22 +514,56 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
 
   // The magic must match exactly for the file to be a BUN container.
   if (header->magic != BUN_MAGIC) {
-    return BUN_MALFORMED;
+    return fail_at(ctx,
+                   BUN_MALFORMED,
+                   "invalid BUN magic value",
+                   BUN_HEADER_MAGIC_OFFSET);
   }
 
   // Reject misaligned sections before attempting any deeper parsing.
-  if (header->asset_table_offset % 4 != 0
-    || header->string_table_offset % 4 != 0
-    || header->data_section_offset % 4 != 0
-    || header->string_table_size % 4 != 0
-    || header->data_section_size % 4 != 0) {
-    return BUN_MALFORMED;
+  if (header->asset_table_offset % 4 != 0) {
+    return fail_at(ctx,
+                   BUN_MALFORMED,
+                   "asset table offset must be 4-byte aligned",
+                   BUN_HEADER_ASSET_TABLE_OFFSET);
+  }
+  if (header->string_table_offset % 4 != 0) {
+    return fail_at(ctx,
+                   BUN_MALFORMED,
+                   "string table offset must be 4-byte aligned",
+                   BUN_HEADER_STRING_TABLE_OFFSET);
+  }
+  if (header->data_section_offset % 4 != 0) {
+    return fail_at(ctx,
+                   BUN_MALFORMED,
+                   "data section offset must be 4-byte aligned",
+                   BUN_HEADER_DATA_SECTION_OFFSET);
+  }
+  if (header->string_table_size % 4 != 0) {
+    return fail_at(ctx,
+                   BUN_MALFORMED,
+                   "string table size must be 4-byte aligned",
+                   BUN_HEADER_STRING_TABLE_SIZE_OFFSET);
+  }
+  if (header->data_section_size % 4 != 0) {
+    return fail_at(ctx,
+                   BUN_MALFORMED,
+                   "data section size must be 4-byte aligned",
+                   BUN_HEADER_DATA_SECTION_SIZE_OFFSET);
   }
 
   // Version Check
-  if (header->version_major != 1
-    || header->version_minor != 0) {
-    return BUN_UNSUPPORTED;
+  if (header->version_major != 1) {
+    return fail_at(ctx,
+                   BUN_UNSUPPORTED,
+                   "unsupported BUN major version",
+                   BUN_HEADER_VERSION_MAJOR_OFFSET);
+  }
+  if (header->version_minor != 0) {
+    return fail_at(ctx,
+                   BUN_UNSUPPORTED,
+                   "unsupported BUN minor version",
+                   BUN_HEADER_VERSION_MINOR_OFFSET);
   }
 
   return BUN_OK;
@@ -320,11 +579,25 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   u64 record_offset = 0;
   u32 idx = 0;
   int saw_unsupported = 0;
+  const char *unsupported_detail = NULL;
+  u64 unsupported_offset = 0;
+  int unsupported_offset_valid = 0;
+  bun_result_t result = BUN_OK;
+
+  clear_error_state(ctx);
 
   if (!mul_u64_checked((u64)header->asset_count,
                        (u64)BUN_ASSET_RECORD_SIZE,
                        &asset_table_size)) {
-    return BUN_MALFORMED;
+    return fail_at(ctx,
+                   BUN_ERR_INT_OVERFLOW,
+                   "asset table size overflows 64-bit arithmetic",
+                   BUN_HEADER_ASSET_COUNT_OFFSET);
+  }
+  reset_parsed_assets(ctx);
+  result = allocate_parsed_assets(ctx, header->asset_count);
+  if (result != BUN_OK) {
+    return result;
   }
 
   asset_section.offset = header->asset_table_offset;
@@ -334,7 +607,9 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
     || !section_within_file(&asset_section, file_size)
     || !section_within_file(&string_section, file_size)
     || !section_within_file(&data_section, file_size)) {
-    return BUN_MALFORMED;
+    return fail_with(ctx,
+                     BUN_MALFORMED,
+                     "one or more file sections lie outside the input file");
   }
 
   if (sections_overlap(&header_section, &asset_section)
@@ -343,39 +618,63 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
     || sections_overlap(&asset_section, &string_section)
     || sections_overlap(&asset_section, &data_section)
     || sections_overlap(&string_section, &data_section)) {
-    return BUN_MALFORMED;
+    return fail_with(ctx, BUN_MALFORMED, "BUN sections overlap in the input file");
   }
 
   for (idx = 0; idx < header->asset_count; idx++) {
     BunAssetRecord record = {0};
+    BunParsedAsset *parsed = &ctx->assets[idx];
     u64 name_end = 0;
     u64 data_end = 0;
     u32 unsupported_flag_bits = 0;
-    bun_result_t result = BUN_OK;
+    result = BUN_OK;
 
     if (!mul_u64_checked((u64)idx, (u64)BUN_ASSET_RECORD_SIZE, &record_offset)) {
-      return BUN_MALFORMED;
+      return fail_with(ctx,
+                       BUN_ERR_INT_OVERFLOW,
+                       "asset record index calculation overflows 64-bit arithmetic");
     }
     if (!add_u64_checked(header->asset_table_offset, record_offset, &record_offset)) {
-      return BUN_MALFORMED;
+      return fail_at(ctx,
+                     BUN_ERR_INT_OVERFLOW,
+                     "asset record offset overflows 64-bit arithmetic",
+                     BUN_HEADER_ASSET_TABLE_OFFSET);
     }
     if (!read_asset_record(ctx->file, record_offset, &record)) {
-      return BUN_ERR_IO;
+      return fail_at(ctx, BUN_ERR_IO, "failed to read asset record", record_offset);
     }
 
     if (!add_u64_checked((u64)record.name_offset,
                          (u64)record.name_length,
-                         &name_end)
-      || name_end > header->string_table_size) {
-      return BUN_MALFORMED;
+                         &name_end)) {
+      return fail_at(ctx,
+                     BUN_ERR_INT_OVERFLOW,
+                     "asset name range overflows 64-bit arithmetic",
+                     record_offset + BUN_RECORD_NAME_OFFSET_OFFSET);
+    }
+    if (name_end > header->string_table_size) {
+      return fail_at(ctx,
+                     BUN_MALFORMED,
+                     "asset name range extends past the string table",
+                     record_offset + BUN_RECORD_NAME_OFFSET_OFFSET);
     }
 
-    if (!add_u64_checked(record.data_offset, record.data_size, &data_end)
-      || data_end > header->data_section_size) {
-      return BUN_MALFORMED;
+    if (!add_u64_checked(record.data_offset, record.data_size, &data_end)) {
+      return fail_at(ctx,
+                     BUN_ERR_INT_OVERFLOW,
+                     "asset data range overflows 64-bit arithmetic",
+                     record_offset + BUN_RECORD_DATA_OFFSET_OFFSET);
+    }
+    if (data_end > header->data_section_size) {
+      return fail_at(ctx,
+                     BUN_MALFORMED,
+                     "asset data range extends past the data section",
+                     record_offset + BUN_RECORD_DATA_OFFSET_OFFSET);
     }
 
-    result = validate_asset_name(ctx, header, &record);
+    parsed->record = record;
+
+    result = validate_asset_name(ctx, header, &record, record_offset, parsed);
     if (result != BUN_OK) {
       return result;
     }
@@ -383,45 +682,92 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
     unsupported_flag_bits = record.flags & ~(BUN_FLAG_ENCRYPTED | BUN_FLAG_EXECUTABLE);
     if (unsupported_flag_bits != 0u) {
       saw_unsupported = 1;
+      note_first_issue(&unsupported_detail,
+                       &unsupported_offset,
+                       &unsupported_offset_valid,
+                       "asset uses unsupported flag bits",
+                       record_offset + BUN_RECORD_FLAGS_OFFSET);
     }
     if (record.checksum != 0u) {
       saw_unsupported = 1;
+      note_first_issue(&unsupported_detail,
+                       &unsupported_offset,
+                       &unsupported_offset_valid,
+                       "non-zero asset checksum is not supported",
+                       record_offset + BUN_RECORD_CHECKSUM_OFFSET);
     }
 
     if (record.compression == BUN_COMPRESSION_NONE) {
-      if (record.uncompressed_size != 0u) {
-        return BUN_MALFORMED;
+      result = capture_raw_data_preview(ctx, header, &record, record_offset, parsed);
+      if (result != BUN_OK) {
+        return result;
       }
+      if (record.uncompressed_size != 0u) {
+        return fail_at(ctx,
+                       BUN_MALFORMED,
+                       "uncompressed assets must store uncompressed_size as zero",
+                       record_offset + BUN_RECORD_UNCOMPRESSED_SIZE_OFFSET);
+      }
+      ctx->parsed_asset_count = idx + 1;
       continue;
     }
 
     if (record.compression == BUN_COMPRESSION_RLE) {
-      result = validate_rle_data(ctx, header, &record);
+      result = validate_rle_data(ctx, header, &record, record_offset, parsed);
       if (result != BUN_OK) {
         return result;
       }
+      ctx->parsed_asset_count = idx + 1;
       continue;
     }
 
     if (record.compression == BUN_COMPRESSION_ZLIB) {
+      result = capture_raw_data_preview(ctx, header, &record, record_offset, parsed);
+      if (result != BUN_OK) {
+        return result;
+      }
       saw_unsupported = 1;
+      note_first_issue(&unsupported_detail,
+                       &unsupported_offset,
+                       &unsupported_offset_valid,
+                       "zlib-compressed assets are not supported yet",
+                       record_offset + BUN_RECORD_COMPRESSION_OFFSET);
+      ctx->parsed_asset_count = idx + 1;
       continue;
     }
 
+    result = capture_raw_data_preview(ctx, header, &record, record_offset, parsed);
+    if (result != BUN_OK) {
+      return result;
+    }
     saw_unsupported = 1;
+    note_first_issue(&unsupported_detail,
+                     &unsupported_offset,
+                     &unsupported_offset_valid,
+                     "unknown compression type is not supported",
+                     record_offset + BUN_RECORD_COMPRESSION_OFFSET);
+    ctx->parsed_asset_count = idx + 1;
   }
 
-  return saw_unsupported ? BUN_UNSUPPORTED : BUN_OK;
+  if (saw_unsupported) {
+    return unsupported_offset_valid
+         ? fail_at(ctx, BUN_UNSUPPORTED, unsupported_detail, unsupported_offset)
+         : fail_with(ctx, BUN_UNSUPPORTED, "file uses unsupported features");
+  }
+
+  return BUN_OK;
 }
 
 bun_result_t bun_close(BunParseContext *ctx) {
   assert(ctx->file);
 
+  reset_parsed_assets(ctx);
   int res = fclose(ctx->file);
   if (res) {
-    return BUN_ERR_IO;
+    return fail_with(ctx, BUN_ERR_IO, "failed to close input file");
   } else {
     ctx->file = NULL;
+    clear_error_state(ctx);
     return BUN_OK;
   }
 }
