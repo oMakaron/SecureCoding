@@ -545,15 +545,6 @@ static bun_result_t decompress_rle(BunParseContext *ctx,
     }
 
     remaining -= (u64)chunk;
-
-    if (remaining > 0 && !seek_to_u64(ctx->file, data_start + (record->data_size - remaining))){
-      return fail_at(
-        ctx,
-        BUN_ERR_IO,
-        "failed to seed RLE asset data",
-        data_start + (record->data_size - remaining)
-      );
-    }
   }
   
   return BUN_OK;
