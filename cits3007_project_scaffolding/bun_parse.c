@@ -448,6 +448,117 @@ static bun_result_t validate_rle_data(BunParseContext *ctx,
                  record_offset + BUN_RECORD_UNCOMPRESSED_SIZE_OFFSET);
 }
 
+/**
+ * RLE decompression for data in a single record.
+ * outputs the result to result_pointer, a pointer to a result buffer from the caller
+ * 
+ * note:
+ * this method won't be checking the validity of parsed record data
+ * it is advised to call this method after calling validate_rle_data
+ * 
+ * dev note:
+ * alternatively we could migrate the RLE check here 
+ * or create a dedicated function for it instead of combining it with preview generator.
+ * Although the first option could only be implemented if we were to use this function
+*/
+static bun_result_t decompress_rle(BunParseContext *ctx, 
+                                   const BunHeader *header,
+                                   const BunAssetRecord *record,
+                                   u64 record_offset,
+                                   u8 **result_pointer) {
+
+  // Check if record is RLE compressed
+  if (record->compression != 1u){
+    return fail_at(
+      ctx,
+      BUN_ERR_IO,
+      "record compression type is not RLE",
+      record_offset + BUN_RECORD_COMPRESSION_OFFSET
+    );
+  }
+
+  // Allocates a result buffer
+  u64 bytes_needed = record->uncompressed_size;
+  if (bytes_needed > (u64) SIZE_MAX){
+    return fail_at(
+      ctx,
+      BUN_ERR_INT_OVERFLOW,
+      "expected uncompressed file size exceeds size_t",
+      record_offset + BUN_RECORD_UNCOMPRESSED_SIZE_OFFSET
+    );
+  }
+  
+  u8 *result = malloc((size_t) bytes_needed);
+  if (result == NULL){
+    return fail_with(
+      ctx,
+      BUN_ERR_IO,
+      "failed to allocate RLE decompression result buffer"
+    );
+  }
+
+  // Finds the data offset in file
+  u64 data_start = 0;
+
+  if(!add_u64_checked(header->data_section_offset, record->data_offset, &data_start)){
+    return fail_at(
+      ctx,
+      BUN_ERR_INT_OVERFLOW,
+      "record data start offset overflows 64-bit arithmetic",
+      record_offset + BUN_RECORD_DATA_OFFSET_OFFSET
+    );
+  }
+
+  // Allocates a data buffer
+  u8 buf[512];
+  u64 remaining = record->data_size;
+
+  if (!seek_to_u64(ctx->file, data_start)){
+    return fail_at(
+      ctx,
+      BUN_ERR_IO,
+      "failed to seek to RLE asset data",
+      data_start
+    );
+  }  
+
+  // Decompress and store
+  u64 result_offset = 0; // tracks the end offset of the result buffer
+  while (remaining > 0){
+    size_t chunk = remaining < sizeof(buf) ? (size_t)remaining : sizeof(buf);
+
+    if (!read_exact(ctx->file, buf, chunk)){
+      return fail_at(
+        ctx,
+        BUN_ERR_IO,
+        "failed to read RLE asset data",
+        data_start + (record->data_size - remaining)
+      );
+    }
+
+    for (size_t idx = 0; idx < chunk; idx += 2){
+      u8 count = buf[idx];
+      u8 value = buf[idx + 1];
+
+      memset(result + result_offset, value, count);
+      result_offset += count;
+    }
+
+    remaining -= (u64)chunk;
+
+    if (remaining > 0 && !seek_to_u64(ctx->file, data_start + (record->data_size - remaining))){
+      return fail_at(
+        ctx,
+        BUN_ERR_IO,
+        "failed to seed RLE asset data",
+        data_start + (record->data_size - remaining)
+      );
+    }
+  }
+  
+  return BUN_OK;
+}
+
 //
 // API implementation
 //
