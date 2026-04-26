@@ -320,37 +320,6 @@ static bun_result_t validate_section_layout(BunParseContext *ctx,
 }
 
 /*
- * Validate that the header, asset table, string table, and data section all
- * stay within the file and do not overlap. Returns BUN_OK on success.
- */
-static bun_result_t validate_section_layout(BunParseContext *ctx,
-                                            const BunSection *header_section,
-                                            const BunSection *asset_section,
-                                            const BunSection *string_section,
-                                            const BunSection *data_section,
-                                            u64 file_size) {
-  if (!section_within_file(header_section, file_size)
-    || !section_within_file(asset_section, file_size)
-    || !section_within_file(string_section, file_size)
-    || !section_within_file(data_section, file_size)) {
-    return fail_with(ctx,
-                     BUN_MALFORMED,
-                     "one or more file sections lie outside the input file");
-  }
-
-  if (sections_overlap(header_section, asset_section)
-    || sections_overlap(header_section, string_section)
-    || sections_overlap(header_section, data_section)
-    || sections_overlap(asset_section, string_section)
-    || sections_overlap(asset_section, data_section)
-    || sections_overlap(string_section, data_section)) {
-    return fail_with(ctx, BUN_MALFORMED, "BUN sections overlap in the input file");
-  }
-
-  return BUN_OK;
-}
-
-/*
  * Asset names are required to be non-empty printable ASCII stored inside the
  * string table. Validate them by streaming a small chunk at a time.
  */
