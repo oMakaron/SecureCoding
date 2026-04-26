@@ -145,13 +145,12 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header);
 
 /**
  * Parse and validate all asset records. Called after bun_parse_header().
+ * Parsed records/previews are written into ctx->assets, and
+ * ctx->parsed_asset_count reports how many entries were safely captured before
+ * the function returned.
  * Returns BUN_OK, BUN_MALFORMED, BUN_UNSUPPORTED, BUN_ERR_IO, or
- * BUN_ERR_INT_OVERFLOW. On failure, ctx contains a short diagnostic message
- * and, where available, the relevant byte offset.
- *
- * You will probably want to extend this signature -- for instance, to pass
- * in the header (needed for offset calculations) or to return the parsed
- * records to the caller.
+ * BUN_ERR_INT_OVERFLOW. On failure, ctx also contains a short diagnostic
+ * message and, where available, the relevant byte offset.
  */
 bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header);
 
