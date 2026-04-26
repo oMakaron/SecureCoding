@@ -6,16 +6,17 @@
 
 #include "bun.h"
 
-/**
- * Example helper: convert 4 bytes in `buf`, positioned at `offset`,
- * into a little-endian u32.
+/*
+ * Decode a 16-bit little-endian value from `buf[offset...]`.
  */
-
 static u16 read_u16_le(const u8 *buf, size_t offset) {
   return (u16)buf[offset]
      | (u16)buf[offset + 1] << 8;
 }
 
+/*
+ * Decode a 32-bit little-endian value from `buf[offset...]`.
+ */
 static u32 read_u32_le(const u8 *buf, size_t offset) {
   return (u32)buf[offset]
      | (u32)buf[offset + 1] << 8
@@ -23,6 +24,9 @@ static u32 read_u32_le(const u8 *buf, size_t offset) {
      | (u32)buf[offset + 3] << 24;
 }
 
+/*
+ * Decode a 64-bit little-endian value from `buf[offset...]`.
+ */
 static u64 read_u64_le(const u8 *buf, size_t offset) {
   return (u64)buf[offset]
      | (u64)buf[offset + 1] << 8
@@ -59,6 +63,9 @@ enum {
   BUN_RECORD_FLAGS_OFFSET = 44u
 };
 
+/*
+ * Clear any previously recorded parser error details in `ctx`.
+ */
 static void clear_error_state(BunParseContext *ctx) {
   ctx->last_error_code = BUN_OK;
   ctx->error_detail = NULL;
@@ -66,6 +73,9 @@ static void clear_error_state(BunParseContext *ctx) {
   ctx->error_offset_valid = 0;
 }
 
+/*
+ * Record an error without a specific byte offset and return `code`.
+ */
 static bun_result_t fail_with(BunParseContext *ctx,
                               bun_result_t code,
                               const char *detail) {
@@ -76,6 +86,9 @@ static bun_result_t fail_with(BunParseContext *ctx,
   return code;
 }
 
+/*
+ * Record an error at `offset` and return `code`.
+ */
 static bun_result_t fail_at(BunParseContext *ctx,
                             bun_result_t code,
                             const char *detail,
@@ -87,6 +100,9 @@ static bun_result_t fail_at(BunParseContext *ctx,
   return code;
 }
 
+/*
+ * Preserve only the first unsupported-feature detail seen during parsing.
+ */
 static void note_first_issue(const char **detail,
                              u64 *offset,
                              int *offset_valid,
@@ -102,8 +118,7 @@ static void note_first_issue(const char **detail,
 }
 
 /*
- * Keep arithmetic helpers small and explicit so every offset/size calculation
- * is checked before it is used in fseek()/fread().
+ * Return 1 and store `lhs + rhs` in `result`; return 0 on u64 overflow.
  */
 static int add_u64_checked(u64 lhs, u64 rhs, u64 *result) {
   if (UINT64_MAX - lhs < rhs) {
@@ -114,6 +129,9 @@ static int add_u64_checked(u64 lhs, u64 rhs, u64 *result) {
   return 1;
 }
 
+/*
+ * Return 1 and store `lhs * rhs` in `result`; return 0 on u64 overflow.
+ */
 static int mul_u64_checked(u64 lhs, u64 rhs, u64 *result) {
   if (lhs != 0 && UINT64_MAX / lhs < rhs) {
     return 0;
@@ -123,15 +141,26 @@ static int mul_u64_checked(u64 lhs, u64 rhs, u64 *result) {
   return 1;
 }
 
+/*
+ * Return the current file size as `u64`. The caller must only use this after
+ * `bun_open()` has validated that `ctx->file_size` is non-negative.
+ */
 static u64 ctx_file_size_u64(const BunParseContext *ctx) {
   assert(ctx->file_size >= 0);
   return (u64)ctx->file_size;
 }
 
+/*
+ * Return 1 and store the exclusive end offset of `section`; return 0 if the
+ * offset/size pair would overflow u64 arithmetic.
+ */
 static int section_end(const BunSection *section, u64 *end) {
   return add_u64_checked(section->offset, section->size, end);
 }
 
+/*
+ * Return 1 if `section` lies fully inside a file of size `file_size`.
+ */
 static int section_within_file(const BunSection *section, u64 file_size) {
   u64 end = 0;
 
@@ -142,6 +171,10 @@ static int section_within_file(const BunSection *section, u64 file_size) {
   return section->offset <= file_size && end <= file_size;
 }
 
+/*
+ * Return 1 if two non-empty sections overlap. Overflow while computing an end
+ * offset is treated as overlap so the layout can be rejected safely.
+ */
 static int sections_overlap(const BunSection *lhs, const BunSection *rhs) {
   u64 lhs_end = 0;
   u64 rhs_end = 0;
@@ -156,6 +189,9 @@ static int sections_overlap(const BunSection *lhs, const BunSection *rhs) {
   return lhs->offset < rhs_end && rhs->offset < lhs_end;
 }
 
+/*
+ * Return 1 if `file` can be positioned at `offset`, otherwise 0.
+ */
 static int seek_to_u64(FILE *file, u64 offset) {
   if (offset > (u64)LONG_MAX) {
     return 0;
@@ -164,10 +200,18 @@ static int seek_to_u64(FILE *file, u64 offset) {
   return fseek(file, (long)offset, SEEK_SET) == 0;
 }
 
+/*
+ * Return 1 after reading exactly `size` bytes into `buf`; return 0 on short
+ * read or any I/O error.
+ */
 static int read_exact(FILE *file, void *buf, size_t size) {
   return fread(buf, 1, size, file) == size;
 }
 
+/*
+ * Read one on-disk asset record from `offset` into `record`. Returns 1 on
+ * success or 0 if seeking/reading fails.
+ */
 static int read_asset_record(FILE *file, u64 offset, BunAssetRecord *record) {
   u8 buf[BUN_ASSET_RECORD_SIZE];
 
@@ -191,6 +235,9 @@ static int read_asset_record(FILE *file, u64 offset, BunAssetRecord *record) {
   return 1;
 }
 
+/*
+ * Release any previously captured asset previews and reset their count to 0.
+ */
 static void reset_parsed_assets(BunParseContext *ctx) {
   ctx->parsed_asset_count = 0;
   ctx->asset_callback = NULL;
@@ -198,6 +245,37 @@ static void reset_parsed_assets(BunParseContext *ctx) {
 }
 
 /* CHANGES: assets are now processed one-by-one via callback */
+
+/*
+ * Validate that the header, asset table, string table, and data section all
+ * stay within the file and do not overlap. Returns BUN_OK on success.
+ */
+static bun_result_t validate_section_layout(BunParseContext *ctx,
+                                            const BunSection *header_section,
+                                            const BunSection *asset_section,
+                                            const BunSection *string_section,
+                                            const BunSection *data_section,
+                                            u64 file_size) {
+  if (!section_within_file(header_section, file_size)
+    || !section_within_file(asset_section, file_size)
+    || !section_within_file(string_section, file_size)
+    || !section_within_file(data_section, file_size)) {
+    return fail_with(ctx,
+                     BUN_MALFORMED,
+                     "one or more file sections lie outside the input file");
+  }
+
+  if (sections_overlap(header_section, asset_section)
+    || sections_overlap(header_section, string_section)
+    || sections_overlap(header_section, data_section)
+    || sections_overlap(asset_section, string_section)
+    || sections_overlap(asset_section, data_section)
+    || sections_overlap(string_section, data_section)) {
+    return fail_with(ctx, BUN_MALFORMED, "BUN sections overlap in the input file");
+  }
+
+  return BUN_OK;
+}
 
 /*
  * Asset names are required to be non-empty printable ASCII stored inside the
@@ -574,23 +652,14 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
   asset_section.offset = header->asset_table_offset;
   asset_section.size = asset_table_size;
-
-  if (!section_within_file(&header_section, file_size)
-    || !section_within_file(&asset_section, file_size)
-    || !section_within_file(&string_section, file_size)
-    || !section_within_file(&data_section, file_size)) {
-    return fail_with(ctx,
-                     BUN_MALFORMED,
-                     "one or more file sections lie outside the input file");
-  }
-
-  if (sections_overlap(&header_section, &asset_section)
-    || sections_overlap(&header_section, &string_section)
-    || sections_overlap(&header_section, &data_section)
-    || sections_overlap(&asset_section, &string_section)
-    || sections_overlap(&asset_section, &data_section)
-    || sections_overlap(&string_section, &data_section)) {
-    return fail_with(ctx, BUN_MALFORMED, "BUN sections overlap in the input file");
+  result = validate_section_layout(ctx,
+                                   &header_section,
+                                   &asset_section,
+                                   &string_section,
+                                   &data_section,
+                                   file_size);
+  if (result != BUN_OK) {
+    return result;
   }
 
   for (idx = 0; idx < header->asset_count; idx++) {
@@ -602,17 +671,13 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
     memset(&parsed_asset, 0, sizeof(parsed_asset));
 
-    if (!mul_u64_checked((u64)idx, (u64)BUN_ASSET_RECORD_SIZE, &record_offset)) {
-      return fail_with(ctx,
-                       BUN_ERR_INT_OVERFLOW,
-                       "asset record index calculation overflows 64-bit arithmetic");
-    }
-    if (!add_u64_checked(header->asset_table_offset, record_offset, &record_offset)) {
-      return fail_at(ctx,
-                     BUN_ERR_INT_OVERFLOW,
-                     "asset record offset overflows 64-bit arithmetic",
-                     BUN_HEADER_ASSET_TABLE_OFFSET);
-    }
+    /*
+     * Safe after `validate_section_layout()`: the full asset table has already
+     * been range-checked against the file size.
+     */
+    record_offset = header->asset_table_offset
+                  + (u64)idx * (u64)BUN_ASSET_RECORD_SIZE;
+                  
     if (!read_asset_record(ctx->file, record_offset, &record)) {
       return fail_at(ctx, BUN_ERR_IO, "failed to read asset record", record_offset);
     }
