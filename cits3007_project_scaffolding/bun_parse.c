@@ -547,6 +547,8 @@ static bun_result_t decompress_rle(BunParseContext *ctx,
     remaining -= (u64)chunk;
   }
   
+  result_pointer = &result;
+
   return BUN_OK;
 }
 
