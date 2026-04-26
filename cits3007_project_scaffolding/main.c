@@ -5,17 +5,24 @@
 
 static const char *result_summary(bun_result_t result) {
   switch (result) {
+    case BUN_OK:
+      return "no error";
     case BUN_MALFORMED:
       return "malformed BUN file";
     case BUN_UNSUPPORTED:
       return "unsupported BUN feature";
     case BUN_ERR_IO:
-      return "I/O or runtime failure";
+      return "I/O error (file not found, read failure, or seek failure)";
+    case BUN_ERR_ARGS:
+      return "wrong number of arguments";
     case BUN_ERR_OVERFLOW:
       return "integer overflow while validating metadata";
-    case BUN_OK:
+    case BUN_ERR_TOOBIG:
+      return "value exceeds implementation limits";
+    case BUN_ERR_ALLOC:
+      return "memory allocation failure";
     default:
-      return "no error";
+      return "Unknown error";
   }
 }
 
