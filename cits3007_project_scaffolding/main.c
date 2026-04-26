@@ -11,7 +11,7 @@ static const char *result_summary(bun_result_t result) {
       return "unsupported BUN feature";
     case BUN_ERR_IO:
       return "I/O or runtime failure";
-    case BUN_ERR_INT_OVERFLOW:
+    case BUN_ERR_OVERFLOW:
       return "integer overflow while validating metadata";
     case BUN_OK:
     default:
@@ -150,7 +150,7 @@ int main(int argc, char *argv[]) {
 
   if (argc != 2) {
     fprintf(stderr, "Usage: %s <file.bun>\n", argv[0]);
-    return BUN_ERR_IO;
+    return BUN_ERR_ARGS;
   }
   const char *path = argv[1];
 

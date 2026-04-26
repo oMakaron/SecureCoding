@@ -156,26 +156,39 @@ static int sections_overlap(const BunSection *lhs, const BunSection *rhs) {
   return lhs->offset < rhs_end && rhs->offset < lhs_end;
 }
 
-static int seek_to_u64(FILE *file, u64 offset) {
+static bun_result_t seek_to_u64(FILE *file, u64 offset) {
   if (offset > (u64)LONG_MAX) {
-    return 0;
+    return BUN_ERR_TOOBIG;
   }
-
-  return fseek(file, (long)offset, SEEK_SET) == 0;
+  if (fseek(file, (long)offset, SEEK_SET) != 0) {
+    return BUN_ERR_IO;
+  }
+  return BUN_OK;
 }
 
-static int read_exact(FILE *file, void *buf, size_t size) {
-  return fread(buf, 1, size, file) == size;
+static bun_result_t read_exact(FILE *file, void *buf, size_t size) {
+  if (fread(buf, 1, size, file) == size) {
+    return BUN_OK;
+  }
+  if (feof(file)) {
+    return BUN_MALFORMED;
+  }
+  return BUN_ERR_IO;
 }
 
-static int read_asset_record(FILE *file, u64 offset, BunAssetRecord *record) {
+static bun_result_t read_asset_record(FILE *file, u64 offset, BunAssetRecord *record) {
   u8 buf[BUN_ASSET_RECORD_SIZE];
 
-  if (!seek_to_u64(file, offset)) {
-    return 0;
+  bun_result_t result = BUN_OK;
+
+  result = seek_to_u64(file, offset);
+  if (result != BUN_OK) {
+    return result;
   }
-  if (!read_exact(file, buf, sizeof(buf))) {
-    return 0;
+  
+  result = read_exact(file, buf, sizeof(buf));
+  if (result != BUN_OK) {
+    return result;
   }
 
   record->name_offset       = read_u32_le(buf, 0);
@@ -188,7 +201,7 @@ static int read_asset_record(FILE *file, u64 offset, BunAssetRecord *record) {
   record->checksum          = read_u32_le(buf, 40);
   record->flags             = read_u32_le(buf, 44);
 
-  return 1;
+  return BUN_OK;
 }
 
 static void reset_parsed_assets(BunParseContext *ctx) {
@@ -207,13 +220,13 @@ static bun_result_t allocate_parsed_assets(BunParseContext *ctx, u32 asset_count
                        (u64)sizeof(*ctx->assets),
                        &bytes_needed)) {
     return fail_at(ctx,
-                   BUN_ERR_INT_OVERFLOW,
+                   BUN_ERR_OVERFLOW,
                    "parsed asset allocation size overflows 64-bit arithmetic",
                    BUN_HEADER_ASSET_COUNT_OFFSET);
   }
   if (bytes_needed > (u64)SIZE_MAX) {
     return fail_at(ctx,
-                   BUN_ERR_INT_OVERFLOW,
+                   BUN_ERR_OVERFLOW,
                    "parsed asset allocation size exceeds size_t",
                    BUN_HEADER_ASSET_COUNT_OFFSET);
   }
@@ -221,7 +234,7 @@ static bun_result_t allocate_parsed_assets(BunParseContext *ctx, u32 asset_count
   ctx->assets = calloc((size_t)asset_count, sizeof(*ctx->assets));
   return ctx->assets != NULL
        ? BUN_OK
-       : fail_with(ctx, BUN_ERR_IO, "failed to allocate parsed asset table");
+       : fail_with(ctx, BUN_ERR_ALLOC, "failed to allocate parsed asset table");
 }
 
 /*
@@ -239,6 +252,8 @@ static bun_result_t validate_asset_name(BunParseContext *ctx,
   u64 name_start = 0;
   u32 prefix_len = 0;
 
+  bun_result_t result = BUN_OK;
+
   if (record->name_length == 0) {
     return fail_at(ctx,
                    BUN_MALFORMED,
@@ -252,7 +267,7 @@ static bun_result_t validate_asset_name(BunParseContext *ctx,
                        (u64)record->name_offset,
                        &name_start)) {
     return fail_at(ctx,
-                   BUN_ERR_INT_OVERFLOW,
+                   BUN_ERR_OVERFLOW,
                    "asset name start offset overflows 64-bit arithmetic",
                    record_offset + BUN_RECORD_NAME_OFFSET_OFFSET);
   }
@@ -264,19 +279,22 @@ static bun_result_t validate_asset_name(BunParseContext *ctx,
 
     if (!add_u64_checked(name_start, offset, &chunk_start)) {
       return fail_at(ctx,
-                     BUN_ERR_INT_OVERFLOW,
+                     BUN_ERR_OVERFLOW,
                      "asset name read offset overflows 64-bit arithmetic",
                      record_offset + BUN_RECORD_NAME_OFFSET_OFFSET);
     }
-    if (!seek_to_u64(ctx->file, chunk_start)) {
+
+    result = seek_to_u64(ctx->file, chunk_start);
+    if (result != BUN_OK) {
       return fail_at(ctx,
-                     BUN_ERR_IO,
+                     result,
                      "failed to seek to asset name bytes",
                      chunk_start);
     }
-    if (!read_exact(ctx->file, buf, chunk)) {
+    result = read_exact(ctx->file, buf, chunk);
+    if (result != BUN_OK) {
       return fail_at(ctx,
-                     BUN_ERR_IO,
+                     result,
                      "failed to read asset name bytes",
                      chunk_start);
     }
@@ -318,6 +336,8 @@ static bun_result_t capture_raw_data_preview(BunParseContext *ctx,
   parsed->data_prefix_size = 0;
   parsed->data_truncated = record->data_size > BUN_DATA_PREFIX_MAX;
 
+  bun_result_t result = BUN_OK;
+
   if (record->data_size == 0u) {
     return BUN_OK;
   }
@@ -325,7 +345,7 @@ static bun_result_t capture_raw_data_preview(BunParseContext *ctx,
                        record->data_offset,
                        &data_start)) {
     return fail_at(ctx,
-                   BUN_ERR_INT_OVERFLOW,
+                   BUN_ERR_OVERFLOW,
                    "asset data start offset overflows 64-bit arithmetic",
                    record_offset + BUN_RECORD_DATA_OFFSET_OFFSET);
   }
@@ -333,16 +353,18 @@ static bun_result_t capture_raw_data_preview(BunParseContext *ctx,
   preview_size = record->data_size < BUN_DATA_PREFIX_MAX
                ? (size_t)record->data_size
                : (size_t)BUN_DATA_PREFIX_MAX;
-
-  if (!seek_to_u64(ctx->file, data_start)) {
+  
+  result = seek_to_u64(ctx->file, data_start);
+  if (result != BUN_OK) {
     return fail_at(ctx,
-                   BUN_ERR_IO,
+                   result,
                    "failed to seek to asset data bytes",
                    data_start);
   }
-  if (!read_exact(ctx->file, parsed->data_prefix, preview_size)) {
+  result = read_exact(ctx->file, parsed->data_prefix, preview_size);
+  if (result != BUN_OK) {
     return fail_at(ctx,
-                   BUN_ERR_IO,
+                   result,
                    "failed to read asset data preview",
                    data_start);
   }
@@ -370,6 +392,8 @@ static bun_result_t validate_rle_data(BunParseContext *ctx,
   parsed->data_prefix_size = 0;
   parsed->data_truncated = 0;
 
+  bun_result_t result = BUN_OK;
+
   if ((record->data_size % 2u) != 0u) {
     return fail_at(ctx,
                    BUN_MALFORMED,
@@ -381,14 +405,15 @@ static bun_result_t validate_rle_data(BunParseContext *ctx,
                        record->data_offset,
                        &data_start)) {
     return fail_at(ctx,
-                   BUN_ERR_INT_OVERFLOW,
+                   BUN_ERR_OVERFLOW,
                    "RLE asset data start offset overflows 64-bit arithmetic",
                    record_offset + BUN_RECORD_DATA_OFFSET_OFFSET);
   }
 
-  if (!seek_to_u64(ctx->file, data_start)) {
+  result = seek_to_u64(ctx->file, data_start);
+  if (result != BUN_OK) {
     return fail_at(ctx,
-                   BUN_ERR_IO,
+                   result,
                    "failed to seek to RLE asset data",
                    data_start);
   }
@@ -397,9 +422,10 @@ static bun_result_t validate_rle_data(BunParseContext *ctx,
     size_t chunk = remaining < sizeof(buf) ? (size_t)remaining : sizeof(buf);
     size_t idx = 0;
 
-    if (!read_exact(ctx->file, buf, chunk)) {
+    result = read_exact(ctx->file, buf, chunk);
+    if (result != BUN_OK) {
       return fail_at(ctx,
-                     BUN_ERR_IO,
+                     result,
                      "failed to read RLE asset data",
                      data_start + (record->data_size - remaining));
     }
@@ -417,7 +443,7 @@ static bun_result_t validate_rle_data(BunParseContext *ctx,
       }
       if (!add_u64_checked(expanded_size, (u64)count, &expanded_size)) {
         return fail_at(ctx,
-                       BUN_ERR_INT_OVERFLOW,
+                       BUN_ERR_OVERFLOW,
                        "RLE expanded size overflows 64-bit arithmetic",
                        record_offset + BUN_RECORD_UNCOMPRESSED_SIZE_OFFSET);
       }
@@ -468,13 +494,20 @@ bun_result_t bun_open(const char *path, BunParseContext *ctx) {
     ctx->file = NULL;
     return fail_with(ctx, BUN_ERR_IO, "could not seek to end of input file");
   }
+
   ctx->file_size = ftell(ctx->file);
   if (ctx->file_size < 0) {
     fclose(ctx->file);
     ctx->file = NULL;
-    return fail_with(ctx, BUN_ERR_IO, "could not determine input file size");
+    return fail_with(ctx, BUN_ERR_TOOBIG, "could not determine input file size");
   }
-  rewind(ctx->file);
+  
+  // NOTE: We replace rewind() with a checked fseek so failures are not silently
+  if (fseek(ctx->file, 0, SEEK_SET) != 0) {
+    fclose(ctx->file);
+    ctx->file = NULL;
+    return fail_with(ctx, BUN_ERR_IO, "could not seek to beginning of input file");
+  }
 
   return BUN_OK;
 }
@@ -496,8 +529,9 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
   }
 
   // slurp the header into `buf`
-  if (fread(buf, 1, BUN_HEADER_SIZE, ctx->file) != BUN_HEADER_SIZE) {
-    return fail_at(ctx, BUN_ERR_IO, "failed to read BUN header", 0u);
+  bun_result_t result = read_exact(ctx->file, buf, BUN_HEADER_SIZE);
+  if (result != BUN_OK) {
+    return fail_at(ctx, result, "failed to read BUN header", 0u);
   }
 
   // Decode the fixed-size header directly from the on-disk byte buffer.
@@ -582,6 +616,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   const char *unsupported_detail = NULL;
   u64 unsupported_offset = 0;
   int unsupported_offset_valid = 0;
+
   bun_result_t result = BUN_OK;
 
   clear_error_state(ctx);
@@ -590,7 +625,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
                        (u64)BUN_ASSET_RECORD_SIZE,
                        &asset_table_size)) {
     return fail_at(ctx,
-                   BUN_ERR_INT_OVERFLOW,
+                   BUN_ERR_OVERFLOW,
                    "asset table size overflows 64-bit arithmetic",
                    BUN_HEADER_ASSET_COUNT_OFFSET);
   }
@@ -631,24 +666,26 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
     if (!mul_u64_checked((u64)idx, (u64)BUN_ASSET_RECORD_SIZE, &record_offset)) {
       return fail_with(ctx,
-                       BUN_ERR_INT_OVERFLOW,
+                       BUN_ERR_OVERFLOW,
                        "asset record index calculation overflows 64-bit arithmetic");
     }
     if (!add_u64_checked(header->asset_table_offset, record_offset, &record_offset)) {
       return fail_at(ctx,
-                     BUN_ERR_INT_OVERFLOW,
+                     BUN_ERR_OVERFLOW,
                      "asset record offset overflows 64-bit arithmetic",
                      BUN_HEADER_ASSET_TABLE_OFFSET);
     }
-    if (!read_asset_record(ctx->file, record_offset, &record)) {
-      return fail_at(ctx, BUN_ERR_IO, "failed to read asset record", record_offset);
+
+    result = read_asset_record(ctx->file, record_offset, &record);
+    if (result != BUN_OK) {
+      return fail_at(ctx, result, "failed to read asset record", record_offset);
     }
 
     if (!add_u64_checked((u64)record.name_offset,
                          (u64)record.name_length,
                          &name_end)) {
       return fail_at(ctx,
-                     BUN_ERR_INT_OVERFLOW,
+                     BUN_ERR_OVERFLOW,
                      "asset name range overflows 64-bit arithmetic",
                      record_offset + BUN_RECORD_NAME_OFFSET_OFFSET);
     }
@@ -661,7 +698,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
     if (!add_u64_checked(record.data_offset, record.data_size, &data_end)) {
       return fail_at(ctx,
-                     BUN_ERR_INT_OVERFLOW,
+                     BUN_ERR_OVERFLOW,
                      "asset data range overflows 64-bit arithmetic",
                      record_offset + BUN_RECORD_DATA_OFFSET_OFFSET);
     }
