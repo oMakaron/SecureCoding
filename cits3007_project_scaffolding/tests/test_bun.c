@@ -56,6 +56,13 @@ START_TEST(test_valid_minimal) {
 }
 END_TEST
 
+
+START_TEST(test_valid_alt_minimal){}END_TEST
+START_TEST(test_valid_one_asset){}END_TEST
+START_TEST(test_valid_binar_asset){}END_TEST
+START_TEST(test_valid_multi_asset_stack){}END_TEST
+START_TEST(test_valid_rle){}END_TEST
+
 START_TEST(test_bad_magic) {
     BunParseContext ctx = {0};
     BunHeader header    = {0};
