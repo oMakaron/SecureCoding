@@ -13,8 +13,6 @@ static const char *result_summary(bun_result_t result) {
       return "unsupported BUN feature";
     case BUN_ERR_IO:
       return "I/O error (file not found, read failure, or seek failure)";
-    case BUN_ERR_ARGS:
-      return "wrong number of arguments";
     case BUN_ERR_OVERFLOW:
       return "integer overflow while validating metadata";
     case BUN_ERR_TOOBIG:
@@ -156,6 +154,7 @@ int main(int argc, char *argv[]) {
   u32 idx = 0;
 
   if (argc != 2) {
+    fprintf(stderr, "Error: Incorrect number of arguments\n");
     fprintf(stderr, "Usage: %s <file.bun>\n", argv[0]);
     return BUN_ERR_ARGS;
   }
