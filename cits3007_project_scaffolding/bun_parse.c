@@ -239,41 +239,12 @@ static int read_asset_record(FILE *file, u64 offset, BunAssetRecord *record) {
  * Release any previously captured asset previews and reset their count to 0.
  */
 static void reset_parsed_assets(BunParseContext *ctx) {
-  free(ctx->assets);
-  ctx->assets = NULL;
   ctx->parsed_asset_count = 0;
+  ctx->asset_callback = NULL;
+  ctx->callback_userdata = NULL;
 }
 
-/*
- * Allocate `ctx->assets` for `asset_count` parsed previews. Returns BUN_OK on
- * success or an error code if the size calculation/allocation fails.
- */
-static bun_result_t allocate_parsed_assets(BunParseContext *ctx, u32 asset_count) {
-  u64 bytes_needed = 0;
-
-  if (asset_count == 0u) {
-    return BUN_OK;
-  }
-  if (!mul_u64_checked((u64)asset_count,
-                       (u64)sizeof(*ctx->assets),
-                       &bytes_needed)) {
-    return fail_at(ctx,
-                   BUN_ERR_INT_OVERFLOW,
-                   "parsed asset allocation size overflows 64-bit arithmetic",
-                   BUN_HEADER_ASSET_COUNT_OFFSET);
-  }
-  if (bytes_needed > (u64)SIZE_MAX) {
-    return fail_at(ctx,
-                   BUN_ERR_INT_OVERFLOW,
-                   "parsed asset allocation size exceeds size_t",
-                   BUN_HEADER_ASSET_COUNT_OFFSET);
-  }
-
-  ctx->assets = calloc((size_t)asset_count, sizeof(*ctx->assets));
-  return ctx->assets != NULL
-       ? BUN_OK
-       : fail_with(ctx, BUN_ERR_IO, "failed to allocate parsed asset table");
-}
+/* CHANGES: assets are now processed one-by-one via callback */
 
 /*
  * Validate that the header, asset table, string table, and data section all
@@ -665,6 +636,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   u64 unsupported_offset = 0;
   int unsupported_offset_valid = 0;
   bun_result_t result = BUN_OK;
+  BunParsedAsset parsed_asset = {0};
 
   clear_error_state(ctx);
 
@@ -676,11 +648,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
                    "asset table size overflows 64-bit arithmetic",
                    BUN_HEADER_ASSET_COUNT_OFFSET);
   }
-  reset_parsed_assets(ctx);
-  result = allocate_parsed_assets(ctx, header->asset_count);
-  if (result != BUN_OK) {
-    return result;
-  }
+  ctx->parsed_asset_count = 0;
 
   asset_section.offset = header->asset_table_offset;
   asset_section.size = asset_table_size;
@@ -696,11 +664,12 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
   for (idx = 0; idx < header->asset_count; idx++) {
     BunAssetRecord record = {0};
-    BunParsedAsset *parsed = &ctx->assets[idx];
     u64 name_end = 0;
     u64 data_end = 0;
     u32 unsupported_flag_bits = 0;
     result = BUN_OK;
+
+    memset(&parsed_asset, 0, sizeof(parsed_asset));
 
     /*
      * Safe after `validate_section_layout()`: the full asset table has already
@@ -708,6 +677,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
      */
     record_offset = header->asset_table_offset
                   + (u64)idx * (u64)BUN_ASSET_RECORD_SIZE;
+                  
     if (!read_asset_record(ctx->file, record_offset, &record)) {
       return fail_at(ctx, BUN_ERR_IO, "failed to read asset record", record_offset);
     }
@@ -740,9 +710,9 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
                      record_offset + BUN_RECORD_DATA_OFFSET_OFFSET);
     }
 
-    parsed->record = record;
+    parsed_asset.record = record;
 
-    result = validate_asset_name(ctx, header, &record, record_offset, parsed);
+    result = validate_asset_name(ctx, header, &record, record_offset, &parsed_asset);
     if (result != BUN_OK) {
       return result;
     }
@@ -766,7 +736,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
     }
 
     if (record.compression == BUN_COMPRESSION_NONE) {
-      result = capture_raw_data_preview(ctx, header, &record, record_offset, parsed);
+      result = capture_raw_data_preview(ctx, header, &record, record_offset, &parsed_asset);
       if (result != BUN_OK) {
         return result;
       }
@@ -776,21 +746,27 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
                        "uncompressed assets must store uncompressed_size as zero",
                        record_offset + BUN_RECORD_UNCOMPRESSED_SIZE_OFFSET);
       }
-      ctx->parsed_asset_count = idx + 1;
+      ctx->parsed_asset_count++;
+      if (ctx->asset_callback != NULL) {
+        ctx->asset_callback(ctx, &parsed_asset, ctx->parsed_asset_count - 1);
+      }
       continue;
     }
 
     if (record.compression == BUN_COMPRESSION_RLE) {
-      result = validate_rle_data(ctx, header, &record, record_offset, parsed);
+      result = validate_rle_data(ctx, header, &record, record_offset, &parsed_asset);
       if (result != BUN_OK) {
         return result;
       }
-      ctx->parsed_asset_count = idx + 1;
+      ctx->parsed_asset_count++;
+      if (ctx->asset_callback != NULL) {
+        ctx->asset_callback(ctx, &parsed_asset, ctx->parsed_asset_count - 1);
+      }
       continue;
     }
 
     if (record.compression == BUN_COMPRESSION_ZLIB) {
-      result = capture_raw_data_preview(ctx, header, &record, record_offset, parsed);
+      result = capture_raw_data_preview(ctx, header, &record, record_offset, &parsed_asset);
       if (result != BUN_OK) {
         return result;
       }
@@ -800,11 +776,14 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
                        &unsupported_offset_valid,
                        "zlib-compressed assets are not supported yet",
                        record_offset + BUN_RECORD_COMPRESSION_OFFSET);
-      ctx->parsed_asset_count = idx + 1;
+      ctx->parsed_asset_count++;
+      if (ctx->asset_callback != NULL) {
+        ctx->asset_callback(ctx, &parsed_asset, ctx->parsed_asset_count - 1);
+      }
       continue;
     }
 
-    result = capture_raw_data_preview(ctx, header, &record, record_offset, parsed);
+    result = capture_raw_data_preview(ctx, header, &record, record_offset, &parsed_asset);
     if (result != BUN_OK) {
       return result;
     }
@@ -814,7 +793,10 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
                      &unsupported_offset_valid,
                      "unknown compression type is not supported",
                      record_offset + BUN_RECORD_COMPRESSION_OFFSET);
-    ctx->parsed_asset_count = idx + 1;
+    ctx->parsed_asset_count++;
+    if (ctx->asset_callback != NULL) {
+      ctx->asset_callback(ctx, &parsed_asset, ctx->parsed_asset_count - 1);
+    }
   }
 
   if (saw_unsupported) {
@@ -829,7 +811,8 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 bun_result_t bun_close(BunParseContext *ctx) {
   assert(ctx->file);
 
-  reset_parsed_assets(ctx);
+  ctx->asset_callback = NULL;
+  ctx->callback_userdata = NULL;
   int res = fclose(ctx->file);
   if (res) {
     return fail_with(ctx, BUN_ERR_IO, "failed to close input file");
