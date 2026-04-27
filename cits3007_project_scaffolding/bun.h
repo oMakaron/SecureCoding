@@ -90,6 +90,16 @@ typedef struct {
 } BunParsedAsset;
 
 //
+// Parse context forward declaration
+//
+typedef struct BunParseContext BunParseContext;
+
+//
+// Callback type for handling parsed assets
+//
+typedef void (*BunAssetCallback)(BunParseContext *ctx, const BunParsedAsset *asset, u32 asset_index);
+
+//
 // Parse context
 //
 // A struct to store information about the state of your parser (rather than
@@ -98,16 +108,17 @@ typedef struct {
 // You will likely want to add fields to it as your implementation grows.
 //
 
-typedef struct {
-    FILE   *file;           // open file handle
-    long    file_size;      // total file size in bytes
-    BunParsedAsset *assets; // parsed asset previews, one per successfully read asset
-    u32 parsed_asset_count; // number of assets safely captured in `assets`
-    bun_result_t last_error_code;  // most recent non-OK parser result
-    const char *error_detail;      // static explanation for `last_error_code`
-    u64 error_offset;              // byte offset relevant to the last error
-    int error_offset_valid;        // whether `error_offset` is meaningful
-} BunParseContext;
+struct BunParseContext {
+    FILE   *file;                       // open file handle
+    long    file_size;                  // total file size in bytes
+    BunAssetCallback asset_callback;    // callback function called for each successfully parsed asset
+    void *callback_userdata;            // optional user data passed to callback
+    u32 parsed_asset_count;             // number of assets successfully processed
+    bun_result_t last_error_code;       // most recent non-OK parser result
+    const char *error_detail;           // static explanation for `last_error_code`
+    u64 error_offset;                   // byte offset relevant to the last error
+    int error_offset_valid;             // whether `error_offset` is meaningful
+};
 
 //
 // Public API

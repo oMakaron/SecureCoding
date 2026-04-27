@@ -113,7 +113,6 @@ static void print_header_summary(const BunParseContext *ctx,
   printf("  data_section_size: %llu\n",
          (unsigned long long)header->data_section_size);
   printf("  reserved: %llu\n", (unsigned long long)header->reserved);
-  printf("Assets parsed: %u/%u\n", ctx->parsed_asset_count, header->asset_count);
 }
 
 static void print_asset_summary(const BunParsedAsset *asset, u32 index) {
@@ -150,9 +149,12 @@ static void print_asset_summary(const BunParsedAsset *asset, u32 index) {
   }
 }
 
-int main(int argc, char *argv[]) {
-  u32 idx = 0;
+static void asset_callback(BunParseContext *ctx, const BunParsedAsset *asset, u32 asset_index) {
+  (void)ctx;
+  print_asset_summary(asset, asset_index);
+}
 
+int main(int argc, char *argv[]) {
   if (argc != 2) {
     fprintf(stderr, "Error: Incorrect number of arguments\n");
     fprintf(stderr, "Usage: %s <file.bun>\n", argv[0]);
@@ -176,12 +178,14 @@ int main(int argc, char *argv[]) {
     return result;
   }
 
+  print_header_summary(&ctx, &header);
+
+  /* Register the asset callback to print each asset as it's parsed */
+  ctx.asset_callback = asset_callback;
+
   result = bun_parse_assets(&ctx, &header);
 
-  print_header_summary(&ctx, &header);
-  for (idx = 0; idx < ctx.parsed_asset_count; idx++) {
-    print_asset_summary(&ctx.assets[idx], idx);
-  }
+  printf("Assets parsed: %u/%u\n", ctx.parsed_asset_count, header.asset_count);
 
   if (result != BUN_OK) {
     print_parser_error(stderr, result, &ctx);
