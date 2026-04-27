@@ -30,7 +30,8 @@ static const char *fixture(const char *filename) {
     if (res < 0 ) {
       die("snprintf failed: %s, for %s", strerror(errno), filename);
     }
-    if ((size_t) res > sizeof(path)) {
+    
+    if ((size_t) res >= sizeof(path)) {
       die("filename '%s' too big for buffer (would write %d bytes to %zu-size buffer)",
           filename, res, sizeof(path));
     }
@@ -87,10 +88,9 @@ START_TEST(test_valid_one_asset) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
     BunTestTracker my_data = {0};
-
-    bun_open(fixture("valid/03-one-asset.bun"), &ctx);
-    bun_parse_header(&ctx, &header);
-
+    
+    ck_assert_int_eq(bun_open(fixture("valid/03-one-asset.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
     // Register the callback before parsing assets
     ctx.asset_callback = (BunAssetCallback)test_asset_cb;
     ctx.callback_userdata = &my_data;
@@ -260,7 +260,8 @@ START_TEST(test_bad_asset_name_past_string_table) {
 
     bun_open(fixture("invalid/06-asset-name-past-string-table.bun"), &ctx);
     
-    bun_parse_header(&ctx, &header);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    
     
     ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
@@ -296,7 +297,7 @@ START_TEST(test_bad_misaligned_section_size) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
 
-    bun_open(fixture("invalid/17-misaligned-section-size.bun"), &ctx);
+    ck_assert_int_eq(bun_open(fixture("invalid/17-misaligned-section-size.bun"), &ctx), BUN_OK);
     ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
 }
@@ -416,10 +417,10 @@ START_TEST(test_bad_overlapping_with_nonprintable) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
 
-    bun_open(fixture("invalid/10-overlapping-with-nonprintable.bun"), &ctx);
-
-    bun_parse_header(&ctx, &header);
-
+    ck_assert_int_eq(bun_open(fixture("invalid/10-overlapping-with-nonprintable.bun"), &ctx), BUN_OK);
+    
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    
     ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
 }
@@ -428,11 +429,13 @@ END_TEST
 START_TEST(test_bad_second_asset_empty_name) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
+    
+    ck_assert_int_eq(bun_open(fixture("invalid/11-second-asset-empty-name.bun"), &ctx), BUN_OK);
+   
 
-    bun_open(fixture("invalid/11-second-asset-empty-name.bun"), &ctx);
-
-    bun_parse_header(&ctx, &header);
-
+    
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    
     ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
 }
@@ -441,11 +444,10 @@ END_TEST
 START_TEST(test_bad_asset_name_oob) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
-
-    bun_open(fixture("invalid/12-asset-name-oob.bun"), &ctx);
-
-    bun_parse_header(&ctx, &header);
-
+    ck_assert_int_eq(bun_open(fixture("invalid/12-asset-name-oob.bun"), &ctx), BUN_OK);
+ 
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    
     ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
 }
@@ -455,10 +457,11 @@ START_TEST(test_bad_asset_empty_name) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
 
-    bun_open(fixture("invalid/13-asset-empty-name.bun"), &ctx);
+    ck_assert_int_eq(bun_open(fixture("invalid/13-asset-empty-name.bun"), &ctx), BUN_OK);
 
-    bun_parse_header(&ctx, &header);
-
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    
+  
     ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
 }
@@ -512,8 +515,8 @@ END_TEST
 START_TEST(test_bad_rle_truncated) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
-
-    bun_open(fixture("invalid/16-rle-truncated.bun"), &ctx);
+    ck_assert_int_eq(bun_open(fixture("invalid/16-rle-truncated.bun"), &ctx), BUN_OK);
+    
     ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
 }
@@ -525,7 +528,8 @@ START_TEST(test_state_parse_assets_before_header) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
     
-    bun_open(fixture("valid/01-basic.bun"), &ctx);
+    ck_assert_int_eq(bun_open(fixture("valid/01-basic.bun"), &ctx), BUN_OK);
+
     
     // ERROR: Attempting to parse assets before the header has been processed.
     // The context won't know where the asset table is yet.
@@ -538,8 +542,11 @@ START_TEST(test_state_double_parse_header) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
     
-    bun_open(fixture("valid/01-basic.bun"), &ctx);
-    bun_parse_header(&ctx, &header);
+    ck_assert_int_eq(bun_open(fixture("valid/01-basic.bun"), &ctx), BUN_OK);
+    
+    
+    
+     ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
     
     // ERROR: Calling parse_header twice on the same context should either
     // be ignored or return a state error to prevent redundant processing.
@@ -551,7 +558,9 @@ START_TEST(test_state_double_parse_header) {
 START_TEST(test_lifecycle_double_close) {
     BunParseContext ctx = {0};
     
-    bun_open(fixture("valid/01-basic.bun"), &ctx);
+    ck_assert_int_eq(bun_open(fixture("valid/01-basic.bun"), &ctx), BUN_OK);
+    
+    ;
     bun_close(&ctx);
     
     // SECURITY: A second close should not crash the program (Double Free).
