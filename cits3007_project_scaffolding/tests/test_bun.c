@@ -541,6 +541,8 @@ START_TEST(test_lifecycle_close_without_open) {
     bun_close(&ctx);
 } END_TEST
 
+
+
 // Assemble a test suite from our tests
 static Suite *bun_suite(void) {
     Suite *s = suite_create("\n\nBUN-Parser-Security-Gauntlet");
