@@ -17,3 +17,6 @@ sudo apt-get install -y afl++
 
 # Install Valgrind - dynamic analyser 
 sudo apt-get install -y valgrind
+
+sudo apt install check
+sudo apt install pkg-config
