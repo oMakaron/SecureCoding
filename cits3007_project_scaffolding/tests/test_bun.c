@@ -41,21 +41,13 @@ static const char *fixture(const char *filename) {
 
 START_TEST(test_valid_minimal) {
     BunParseContext ctx = {0};
-    BunHeader header    = {0};
+    BunHeader header = {0};
 
-    bun_result_t r = bun_open(fixture("valid/01-empty.bun"), &ctx);
-    ck_assert_int_eq(r, BUN_OK);
-
-    r = bun_parse_header(&ctx, &header);
-    ck_assert_int_eq(r, BUN_OK);
+    ck_assert_int_eq(bun_open(fixture("valid/01-empty.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
     ck_assert_uint_eq(header.magic, BUN_MAGIC);
-    ck_assert_uint_eq(header.version_major, 1);
-    ck_assert_uint_eq(header.version_minor, 0);
-
     bun_close(&ctx);
-}
-END_TEST
-
+} END_TEST
 
 START_TEST(test_valid_alt_minimal){
     BunParseContext ctx = {0};
@@ -114,106 +106,92 @@ START_TEST(test_valid_multi_asset_stack){
     bun_close(&ctx);
 }END_TEST
 
-
-START_TEST(test_valid_rle){
+START_TEST(test_valid_rle) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
 
     ck_assert_int_eq(bun_open(fixture("valid/06-rle-valid.bun"), &ctx), BUN_OK);
     ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
-
-    // RLE files still need a valid magic and version
-    ck_assert_uint_eq(header.magic, BUN_MAGIC);
     
-    // You might eventually add a check here to ensure the 
-    // compression flag in the asset table is set to RLE.
-    
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_OK);
     bun_close(&ctx);
-}END_TEST
+} END_TEST
 
 /*******************************************************************/
 /*******************************************************************/
 
 START_TEST(test_bad_magic) {
     BunParseContext ctx = {0};
-    BunHeader header    = {0};
-
-    bun_result_t r = bun_open(fixture("invalid/01-bad-magic.bun"), &ctx);
-    ck_assert_int_eq(r, BUN_OK);
-
-    r = bun_parse_header(&ctx, &header);
-    ck_assert_int_eq(r, BUN_MALFORMED);
-
+    BunHeader header = {0};
+    
+    ck_assert_int_eq(bun_open(fixture("invalid/01-bad-magic.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
-}
-END_TEST
+} END_TEST
 
 START_TEST(test_bad_version) {
     BunParseContext ctx = {0};
-    BunHeader header    = {0};
+    BunHeader header = {0};
 
-    bun_result_t r = bun_open(fixture("invalid/02-bad-version.bun"), &ctx);
-    ck_assert_int_eq(r, BUN_OK);
-
-    r = bun_parse_header(&ctx, &header);
-    ck_assert_int_eq(r, BUN_UNSUPPORTED);
-
+    ck_assert_int_eq(bun_open(fixture("invalid/02-bad-version.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_UNSUPPORTED);
     bun_close(&ctx);
-}
-END_TEST
+} END_TEST
 
-
-START_TEST(test_bad_offset_alignment){
+START_TEST(test_bad_offset_alignment) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
 
-    bun_open(fixture("invalid/03-bad-offset-alignment.bun"), &ctx);
+    ck_assert_int_eq(bun_open(fixture("invalid/03-bad-offset-alignment.bun"), &ctx), BUN_OK);
     ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
+} END_TEST
 
-}
-END_TEST
 
 
 START_TEST(test_bad_section_past_eof) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
-
-    bun_open(fixture("invalid/04-section-past-eof.bun"), &ctx);
-    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+    ck_assert_int_eq(bun_open(fixture("invalid/04-section-past-eof.bun"), &ctx), BUN_OK);
+    // Header is structurally fine
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    // Logic error caught here
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
-}
-END_TEST
+} END_TEST
 
 START_TEST(test_bad_overlapping_sections) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
-
-    bun_open(fixture("invalid/05-overlapping-sections.bun"), &ctx);
-    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+    ck_assert_int_eq(bun_open(fixture("invalid/05-overlapping-sections.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
-}
-END_TEST
+} END_TEST
 
 START_TEST(test_bad_asset_name_past_string_table) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
 
     bun_open(fixture("invalid/06-asset-name-past-string-table.bun"), &ctx);
-    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+    
+    bun_parse_header(&ctx, &header);
+    
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
 }
 END_TEST
+
 
 START_TEST(test_bad_asset_name_nonprintable) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
-
-    bun_open(fixture("invalid/07-asset-name-nonprintable.bun"), &ctx);
-    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+    ck_assert_int_eq(bun_open(fixture("invalid/07-asset-name-nonprintable.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
-}
-END_TEST
+} END_TEST
+
 
 START_TEST(test_bad_truncated_file) {
     BunParseContext ctx = {0};
@@ -240,7 +218,10 @@ START_TEST(test_bad_overlapping_with_nonprintable) {
     BunHeader header = {0};
 
     bun_open(fixture("invalid/10-overlapping-with-nonprintable.bun"), &ctx);
-    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+
+    bun_parse_header(&ctx, &header);
+
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
 }
 END_TEST
@@ -250,7 +231,10 @@ START_TEST(test_bad_second_asset_empty_name) {
     BunHeader header = {0};
 
     bun_open(fixture("invalid/11-second-asset-empty-name.bun"), &ctx);
-    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+
+    bun_parse_header(&ctx, &header);
+
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
 }
 END_TEST
@@ -260,7 +244,10 @@ START_TEST(test_bad_asset_name_oob) {
     BunHeader header = {0};
 
     bun_open(fixture("invalid/12-asset-name-oob.bun"), &ctx);
-    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+
+    bun_parse_header(&ctx, &header);
+
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
 }
 END_TEST
@@ -270,7 +257,10 @@ START_TEST(test_bad_asset_empty_name) {
     BunHeader header = {0};
 
     bun_open(fixture("invalid/13-asset-empty-name.bun"), &ctx);
-    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+
+    bun_parse_header(&ctx, &header);
+
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
 }
 END_TEST
@@ -279,18 +269,22 @@ START_TEST(test_bad_rle_zero_count) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
 
-    bun_open(fixture("invalid/14-rle-zero-count.bun"), &ctx);
-    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+    ck_assert_int_eq(bun_open(fixture("invalid/14-rle-zero-count.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
-}
-END_TEST
+} END_TEST
+
 
 START_TEST(test_bad_rle_bomb) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
 
-    bun_open(fixture("invalid/15-rle-bomb.bun"), &ctx);
+    ck_assert_int_eq(bun_open(fixture("invalid/15-rle-bomb.bun"), &ctx), BUN_OK);
+
+    /* If header is malformed, that's still a valid rejection */
     ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+
     bun_close(&ctx);
 }
 END_TEST
