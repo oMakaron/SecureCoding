@@ -809,22 +809,24 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 }
 
 bun_result_t bun_close(BunParseContext *ctx) {
-  if (ctx == NULL) return;
+    // 1. Safety check: If the context is already NULL, we are done.
+    if (ctx == NULL) {
+        return BUN_OK;
+    }
 
-    // Change assert(ctx->file) to:
-  if (ctx->file != NULL) {
-    fclose(ctx->file);
-    ctx->file = NULL; // Set to NULL to prevent double-free
-  }
+    // 2. Only attempt to close if the file pointer exists.
+    if (ctx->file != NULL) {
+        if (fclose(ctx->file) != 0) {
+            // If fclose fails, it's usually an IO error (e.g., disk issues)
+            ctx->file = NULL; // Still set to NULL so we don't try again
+            return BUN_ERR_IO; 
+        }
+        ctx->file = NULL; // Success! Reset the pointer.
+    }
 
-  ctx->asset_callback = NULL;
-  ctx->callback_userdata = NULL;
-  int res = fclose(ctx->file);
-  if (res) {
-    return fail_with(ctx, BUN_ERR_IO, "failed to close input file");
-  } else {
-    ctx->file = NULL;
-    clear_error_state(ctx);
+    ctx->asset_callback = NULL;
+    ctx->callback_userdata = NULL;
+    
+
     return BUN_OK;
-  }
 }

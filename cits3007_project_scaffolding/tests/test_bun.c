@@ -43,10 +43,15 @@ typedef struct {
     char last_name[64];
 } BunTestTracker;
 
-// 2. Create the callback function
+
 static void test_asset_cb(BunParseContext *ctx, const void *asset_ptr, u32 asset_index) {
+    (void)asset_ptr;  
+    (void)asset_index;
+
     BunTestTracker *res = (BunTestTracker *)ctx->callback_userdata;
-    res->count++;
+    if (res) {
+        res->count++;
+    }
 }
 
 // Example test suite: header parsing
@@ -87,7 +92,7 @@ START_TEST(test_valid_one_asset) {
     bun_parse_header(&ctx, &header);
 
     // Register the callback before parsing assets
-    ctx.asset_callback = test_asset_cb;
+    ctx.asset_callback = (BunAssetCallback)test_asset_cb;
     ctx.callback_userdata = &my_data;
 
     ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_OK);
@@ -146,7 +151,7 @@ START_TEST(test_valid_zero_assets) {
     ck_assert_uint_eq(header.asset_count, 0);
 
     // Register the callback
-    ctx.asset_callback = test_asset_cb;
+    ctx.asset_callback = (BunAssetCallback)test_asset_cb;
     ctx.callback_userdata = &my_data;
 
     // This should succeed
