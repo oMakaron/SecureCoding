@@ -321,6 +321,8 @@ static Suite *bun_suite(void) {
     tcase_add_test(tc_header, test_valid_multi_asset_stack);
     tcase_add_test(tc_header, test_valid_rle);
 
+    tcase_add_test(tc_header, test_bad_magic);
+    tcase_add_test(tc_header, test_bad_version);
     tcase_add_test(tc_header, test_bad_offset_alignment);
     tcase_add_test(tc_header, test_bad_section_past_eof);
     tcase_add_test(tc_header, test_bad_overlapping_sections);
