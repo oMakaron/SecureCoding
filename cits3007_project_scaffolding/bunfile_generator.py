@@ -23,7 +23,7 @@ def write_asset_record(f, name_off, name_len, data_off, data_size):
     data = struct.pack(_RECORD_FMT, name_off, name_len, data_off, data_size, 0, 0, 0, 0, 0)
     f.write(data)
 
-# --- Generator Functions (Matching your Screenshots) ---
+# --- Generator Functions  ---
 
 def make_valid_suite():
     # 07: Zero Assets (Valid according to spec, count is just 0)
@@ -78,7 +78,7 @@ def make_invalid_suite():
     make_trunc_asset_record()
     make_non_null_terminated()
 
-# --- Helper wrappers for 20-27 (simplified for space) ---
+# --- Helper wrappers for 20-27 ---
 def make_asset_count_max():
     with open("tests/samples/invalid/20-asset-count-max.bun", "wb") as f:
         write_header(f, 0xFFFFFFFF, HEADER_SIZE, HEADER_SIZE+4, 4, HEADER_SIZE+8, 4)
@@ -121,7 +121,7 @@ def main():
     Path("tests/samples/invalid").mkdir(parents=True, exist_ok=True)
     make_valid_suite()
     make_invalid_suite()
-    print("Success: Generated files matching screenshots.")
+    print("Success.")
 
 if __name__ == "__main__":
     main()
