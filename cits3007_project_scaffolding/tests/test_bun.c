@@ -308,6 +308,70 @@ END_TEST
 
 
 // Assemble a test suite from our tests
+static Suite *bun_suite(void) {
+    Suite *s = suite_create("\n\nBUN-Parser-Security-Gauntlet");
+
+    /* 1. POSITIVE TESTS: Files that should work perfectly */
+    TCase *tc_valid = tcase_create("\n\nValid-Files");
+    tcase_add_test(tc_valid, test_valid_minimal); 
+    tcase_add_test(tc_valid, test_valid_alt_minimal);
+    tcase_add_test(tc_valid, test_valid_one_asset);
+    tcase_add_test(tc_valid, test_valid_binar_asset);
+    tcase_add_test(tc_valid, test_valid_multi_asset_stack);
+    tcase_add_test(tc_valid, test_valid_rle);
+    suite_add_tcase(s, tc_valid);
+
+    /* 2. STRUCTURAL CHECKS: Magic numbers, versions, and alignment */
+    TCase *tc_structure = tcase_create("\n\nStructure-and-Alignment");
+    tcase_add_test(tc_structure, test_bad_magic);
+    tcase_add_test(tc_structure, test_bad_version);
+    tcase_add_test(tc_structure, test_bad_offset_alignment);
+    tcase_add_test(tc_structure, test_bad_misaligned_section_size);
+    suite_add_tcase(s, tc_structure);
+
+    /* 3. BOUNDARY & SECURITY: Overlaps and EOF violations */
+    TCase *tc_security = tcase_create("\n\nMemory-Boundary-Safety");
+    tcase_add_test(tc_security, test_bad_section_past_eof);
+    tcase_add_test(tc_security, test_bad_overlapping_sections);
+    tcase_add_test(tc_security, test_bad_truncated_file);
+    suite_add_tcase(s, tc_security);
+
+    /* 4. STRING TABLE: Name validation and pointer logic */
+    TCase *tc_strings = tcase_create("\n\nString-Table-Logic");
+    tcase_add_test(tc_strings, test_bad_asset_name_past_string_table);
+    tcase_add_test(tc_strings, test_bad_asset_name_nonprintable);
+    tcase_add_test(tc_strings, test_bad_overlapping_with_nonprintable);
+    tcase_add_test(tc_strings, test_bad_second_asset_empty_name);
+    tcase_add_test(tc_strings, test_bad_asset_name_oob);
+    tcase_add_test(tc_strings, test_bad_asset_empty_name);
+    suite_add_tcase(s, tc_strings);
+
+    /* 5. COMPRESSION: RLE specifics and decompression bombs */
+    TCase *tc_compression = tcase_create("\n\nCompression-Hardening");
+    tcase_add_test(tc_compression, test_bad_rle_zero_count);
+    tcase_add_test(tc_compression, test_bad_rle_bomb);
+    tcase_add_test(tc_compression, test_bad_rle_truncated);
+    suite_add_tcase(s, tc_compression);
+
+    return s;
+}
+
+int main(void) {
+    Suite   *s  = bun_suite();
+    SRunner *sr = srunner_create(s);
+
+    // Set to CK_VERBOSE to see the "Story" of the categories passing/failing
+    srunner_run_all(sr, CK_VERBOSE);
+    
+    int failed = srunner_ntests_failed(sr);
+    srunner_free(sr);
+
+    return failed == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+
+
+
 
 static Suite *bun_suite(void) {
     Suite *s = suite_create("bun-suite");
