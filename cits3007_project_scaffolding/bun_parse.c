@@ -809,7 +809,13 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 }
 
 bun_result_t bun_close(BunParseContext *ctx) {
-  assert(ctx->file);
+  if (ctx == NULL) return;
+
+    // Change assert(ctx->file) to:
+  if (ctx->file != NULL) {
+    fclose(ctx->file);
+    ctx->file = NULL; // Set to NULL to prevent double-free
+  }
 
   ctx->asset_callback = NULL;
   ctx->callback_userdata = NULL;

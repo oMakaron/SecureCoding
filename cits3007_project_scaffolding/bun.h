@@ -17,6 +17,7 @@ typedef enum {
                               document them in your report */
     BUN_ERR_INT_OVERFLOW = 4, /* arithmetic overflow while validating
                                  on-disk metadata */
+    BUN_STATE_ERROR = 5 /*Used when libraries are used in wrong order*/
 } bun_result_t;
 
 //
