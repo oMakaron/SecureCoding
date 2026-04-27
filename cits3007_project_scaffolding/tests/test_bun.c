@@ -360,7 +360,7 @@ int main(void) {
     Suite   *s  = bun_suite();
     SRunner *sr = srunner_create(s);
 
-    // Set to CK_VERBOSE to see the "Story" of the categories passing/failing
+    // Set to CK_VERBOSE to see categories passing/failing
     srunner_run_all(sr, CK_VERBOSE);
     
     int failed = srunner_ntests_failed(sr);
@@ -368,58 +368,3 @@ int main(void) {
 
     return failed == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
-
-
-
-
-
-static Suite *bun_suite(void) {
-    Suite *s = suite_create("bun-suite");
-
-    // Note that "TCase" is more like a sub-suite than a single test case
-    TCase *tc_header = tcase_create("header-tests");
-
-
-    tcase_add_test(tc_header, test_valid_minimal); 
-    tcase_add_test(tc_header, test_valid_alt_minimal);
-    tcase_add_test(tc_header, test_valid_one_asset);
-    tcase_add_test(tc_header, test_valid_binar_asset);
-    tcase_add_test(tc_header, test_valid_multi_asset_stack);
-    tcase_add_test(tc_header, test_valid_rle);
-
-    tcase_add_test(tc_header, test_bad_magic);
-    tcase_add_test(tc_header, test_bad_version);
-    tcase_add_test(tc_header, test_bad_offset_alignment);
-    tcase_add_test(tc_header, test_bad_section_past_eof);
-    tcase_add_test(tc_header, test_bad_overlapping_sections);
-    tcase_add_test(tc_header, test_bad_asset_name_past_string_table);
-    tcase_add_test(tc_header, test_bad_asset_name_nonprintable);
-    tcase_add_test(tc_header, test_bad_truncated_file);
-    tcase_add_test(tc_header, test_bad_misaligned_section_size);
-    tcase_add_test(tc_header, test_bad_overlapping_with_nonprintable);
-    tcase_add_test(tc_header, test_bad_second_asset_empty_name);
-    tcase_add_test(tc_header, test_bad_asset_name_oob);
-    tcase_add_test(tc_header, test_bad_asset_empty_name);
-    tcase_add_test(tc_header, test_bad_rle_zero_count);
-    tcase_add_test(tc_header, test_bad_rle_bomb);
-    tcase_add_test(tc_header, test_bad_rle_truncated);
-
-    
-    // TODO: add further test cases and TCases (e.g. "assets", "compression")
-    suite_add_tcase(s, tc_header);
-    return s;
-}
-
-int main(void) {
-    Suite   *s  = bun_suite();
-    SRunner *sr = srunner_create(s);
-
-    // see https://libcheck.github.io/check/doc/check_html/check_3.html#SRunner-Output for different output options.
-    // e.g. pass CK_VERBOSE if you want to see successes as well as failures.
-    srunner_run_all(sr, CK_NORMAL);
-    int failed = srunner_ntests_failed(sr);
-    srunner_free(sr);
-
-    return failed == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
-}
-
