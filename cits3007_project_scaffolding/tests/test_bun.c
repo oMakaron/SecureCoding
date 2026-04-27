@@ -117,6 +117,65 @@ START_TEST(test_valid_rle) {
     bun_close(&ctx);
 } END_TEST
 
+
+START_TEST(test_valid_zero_assets) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+
+    // This file has a valid magic/version but asset_count = 0
+    ck_assert_int_eq(bun_open(fixture("valid/07-zero-assets.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    
+    ck_assert_uint_eq(header.asset_count, 0);
+
+    // Should return BUN_OK and simply do nothing
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_OK);
+    
+    // Ensure assets array was never allocated or is NULL
+    ck_assert_ptr_null(ctx.assets);
+
+    bun_close(&ctx);
+} END_TEST
+
+
+START_TEST(test_valid_unordered_layout) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+
+    // File layout: [Data] -> [String Table] -> [Header] 
+    // The Header is at the end, but the parser finds it via internal logic
+    ck_assert_int_eq(bun_open(fixture("valid/08-unordered.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    
+    // Even though it's shuffled, it should still extract data correctly
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_OK);
+    
+    ck_assert_uint_eq(header.asset_count, 1);
+    ck_assert_str_eq(ctx.assets[0].name, "shuffled_asset");
+
+    bun_close(&ctx);
+} END_TEST
+
+
+START_TEST(test_valid_stress_complex) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+
+    // File contains 100 assets, various sizes, mixed RLE and RAW
+    ck_assert_int_eq(bun_open(fixture("valid/09-stress-test.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_OK);
+    
+    // Verify a random asset in the middle to ensure index logic is solid
+    ck_assert_uint_eq(header.asset_count, 100);
+    ck_assert_ptr_nonnull(ctx.assets[99].data); 
+    
+    // Check that we didn't leak memory during this large parse
+    bun_close(&ctx);
+} END_TEST
+
+
 /*******************************************************************/
 /*******************************************************************/
 
@@ -182,7 +241,7 @@ START_TEST(test_bad_asset_name_past_string_table) {
 }
 END_TEST
 
-
+ 
 START_TEST(test_bad_asset_name_nonprintable) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
@@ -203,15 +262,129 @@ START_TEST(test_bad_truncated_file) {
 }
 END_TEST
 
+
+/*******************************************************************/
+/*******************************************************************/
+
 START_TEST(test_bad_misaligned_section_size) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
 
-    bun_open(fixture("invalid/09-misaligned-section-size.bun"), &ctx);
+    bun_open(fixture("invalid/17-misaligned-section-size.bun"), &ctx);
     ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
     bun_close(&ctx);
 }
 END_TEST
+
+
+START_TEST(test_bad_header_logic_contradiction) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+
+    // This file has a string_table_offset that starts BEFORE the asset_table ends.
+    // [Header: 0-60] [Asset Table: 60-108] [String Table: 80-...] <-- OVERLAP!
+    ck_assert_int_eq(bun_open(fixture("invalid/18-header-contradiction.bun"), &ctx), BUN_OK);
+    
+    // The parser should detect the overlap during header validation
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+
+    bun_close(&ctx);
+} END_TEST
+
+
+START_TEST(test_bad_asset_count_mismatch) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+
+    // Header says asset_count = 100, but the file ends right after the header.
+    // 100 * 48 = 4800 bytes expected, but 0 bytes exist.
+    ck_assert_int_eq(bun_open(fixture("invalid/19-asset-count-mismatch.bun"), &ctx), BUN_OK);
+    
+    // bun_parse_header should calculate: header_size + (count * 48) 
+    // and compare it against the actual file size.
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+
+    bun_close(&ctx);
+} END_TEST
+
+
+START_TEST(test_bad_asset_count_max) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+    // Header claims UINT32_MAX assets. malloc(UINT32_MAX * 48) will overflow 
+    // to a small number on 32-bit systems or simply fail.
+    ck_assert_int_eq(bun_open(fixture("invalid/20-asset-count-max.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+    bun_close(&ctx);
+} END_TEST
+
+
+START_TEST(test_bad_size_overflow) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+    // Claims a data_section_size so large that Header + Size > UINT64_MAX.
+    ck_assert_int_eq(bun_open(fixture("invalid/21-size-overflow.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+    bun_close(&ctx);
+} END_TEST
+
+
+START_TEST(test_bad_offset_just_past_eof) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+    // Points to EOF + 1 byte.
+    ck_assert_int_eq(bun_open(fixture("invalid/22-offset-past-eof.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+    bun_close(&ctx);
+} END_TEST
+
+
+START_TEST(test_valid_offset_at_end) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+    // An empty section pointing exactly to the end of the file is technically valid.
+    ck_assert_int_eq(bun_open(fixture("valid/23-offset-at-eof.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    bun_close(&ctx);
+} END_TEST
+
+
+START_TEST(test_bad_duplicate_data_offsets) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+    ck_assert_int_eq(bun_open(fixture("invalid/24-duplicate-offsets.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    // If your security policy forbids aliasing, this should fail.
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
+    bun_close(&ctx);
+} END_TEST
+
+
+START_TEST(test_bad_truncated_mid_string_table) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+    // File ends halfway through a name string.
+    ck_assert_int_eq(bun_open(fixture("invalid/25-trunc-string.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
+    bun_close(&ctx);
+} END_TEST
+
+
+START_TEST(test_bad_truncated_mid_asset_table) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+    // File ends at byte 24 of a 48-byte AssetRecord.
+    ck_assert_int_eq(bun_open(fixture("invalid/26-trunc-asset-record.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_MALFORMED);
+    bun_close(&ctx);
+} END_TEST
+
+
+
+
+/***********************************************************************************************************/
+/***********************************************************************************************************/
 
 START_TEST(test_bad_overlapping_with_nonprintable) {
     BunParseContext ctx = {0};
@@ -265,6 +438,27 @@ START_TEST(test_bad_asset_empty_name) {
 }
 END_TEST
 
+
+START_TEST(test_bad_string_no_null_terminator) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+
+    // The file contains a string "DANGER" with length 6, 
+    // but no null terminator follows it in the string table.
+    ck_assert_int_eq(bun_open(fixture("invalid/27-non-null-terminated.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
+    
+    // This should fail because the parser should validate that 
+    // names are valid C strings.
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_MALFORMED);
+
+    bun_close(&ctx);
+} END_TEST
+
+
+/************************************************************************/
+/************************************************************************/
+
 START_TEST(test_bad_rle_zero_count) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
@@ -298,48 +492,54 @@ START_TEST(test_bad_rle_truncated) {
     bun_close(&ctx);
 }
 END_TEST
+/**************************************************************************************/
+/**************************************************************************************/
 
-/*
-add
-  1. Integer Boundary & Extremes 
-    tcase_add_test(tc_security, test_bad_asset_count_max);
-    tcase_add_test(tc_security, test_bad_size_overflow);
+START_TEST(test_state_parse_assets_before_header) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+    
+    bun_open(fixture("valid/01-basic.bun"), &ctx);
+    
+    // ERROR: Attempting to parse assets before the header has been processed.
+    // The context won't know where the asset table is yet.
+    ck_assert_int_eq(bun_parse_assets(&ctx, &header), BUN_STATE_ERROR);
+    
+    bun_close(&ctx);
+} END_TEST
 
-      2. Offset Edge & Alignment 
-    tcase_add_test(tc_security, test_bad_offset_just_past_eof);
-    tcase_add_test(tc_security, test_valid_offset_at_end);
+START_TEST(test_state_double_parse_header) {
+    BunParseContext ctx = {0};
+    BunHeader header = {0};
+    
+    bun_open(fixture("valid/01-basic.bun"), &ctx);
+    bun_parse_header(&ctx, &header);
+    
+    // ERROR: Calling parse_header twice on the same context should either
+    // be ignored or return a state error to prevent redundant processing.
+    ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_STATE_ERROR);
+    
+    bun_close(&ctx);
+} END_TEST
 
-    3. Empty vs. Minimal Structures 
-    tcase_add_test(tc_valid, test_valid_zero_assets);
+START_TEST(test_lifecycle_double_close) {
+    BunParseContext ctx = {0};
+    
+    bun_open(fixture("valid/01-basic.bun"), &ctx);
+    bun_close(&ctx);
+    
+    // SECURITY: A second close should not crash the program (Double Free).
+    // Your bun_close should set pointers to NULL after freeing.
+    bun_close(&ctx); 
+} END_TEST
 
-      4. String Table Edges 
-    tcase_add_test(tc_strings, test_bad_string_no_null_terminator);
-
-      5. Duplicate / Aliasing Cases 
-    tcase_add_test(tc_security, test_bad_duplicate_data_offsets);
-
-      6. Section Ordering Assumptions 
-    tcase_add_test(tc_valid, test_valid_unordered_layout);
-
-      7. Repeated Parsing / State Safety 
-    tcase_add_test(tc_lifecycle, test_state_parse_assets_before_header);
-    tcase_add_test(tc_lifecycle, test_state_double_parse_header);
-
-    8. Lifecycle Misuse 
-    tcase_add_test(tc_lifecycle, test_lifecycle_double_close);
-    tcase_add_test(tc_lifecycle, test_lifecycle_close_without_open);
-
-    9. Partial / Interrupted Structures 
-    tcase_add_test(tc_security, test_bad_truncated_mid_string_table);
-    tcase_add_test(tc_security, test_bad_truncated_mid_asset_table);
-
-      10. Cross-field Consistency 
-    tcase_add_test(tc_structure, test_bad_header_logic_contradiction);
-    tcase_add_test(tc_structure, test_bad_asset_count_mismatch);
-
-      11. Extreme Valid (Stress Test) 
-    tcase_add_test(tc_valid, test_valid_stress_complex);
-*/
+START_TEST(test_lifecycle_close_without_open) {
+    BunParseContext ctx = {0}; // Zero-initialized
+    
+    // A robust API allows closing a context that was never opened 
+    // without causing a segfault.
+    bun_close(&ctx);
+} END_TEST
 
 // Assemble a test suite from our tests
 static Suite *bun_suite(void) {
@@ -353,6 +553,9 @@ static Suite *bun_suite(void) {
     tcase_add_test(tc_valid, test_valid_binar_asset);
     tcase_add_test(tc_valid, test_valid_multi_asset_stack);
     tcase_add_test(tc_valid, test_valid_rle);
+    tcase_add_test(tc_valid, test_valid_zero_assets);          
+    tcase_add_test(tc_valid, test_valid_unordered_layout);     
+    tcase_add_test(tc_valid, test_valid_stress_complex);       
     suite_add_tcase(s, tc_valid);
 
     /* 2. STRUCTURAL CHECKS: Magic numbers, versions, and alignment */
@@ -361,6 +564,8 @@ static Suite *bun_suite(void) {
     tcase_add_test(tc_structure, test_bad_version);
     tcase_add_test(tc_structure, test_bad_offset_alignment);
     tcase_add_test(tc_structure, test_bad_misaligned_section_size);
+    tcase_add_test(tc_structure, test_bad_header_logic_contradiction); 
+    tcase_add_test(tc_structure, test_bad_asset_count_mismatch);       
     suite_add_tcase(s, tc_structure);
 
     /* 3. BOUNDARY & SECURITY: Overlaps and EOF violations */
@@ -368,6 +573,13 @@ static Suite *bun_suite(void) {
     tcase_add_test(tc_security, test_bad_section_past_eof);
     tcase_add_test(tc_security, test_bad_overlapping_sections);
     tcase_add_test(tc_security, test_bad_truncated_file);
+    tcase_add_test(tc_security, test_bad_asset_count_max);             
+    tcase_add_test(tc_security, test_bad_size_overflow);                
+    tcase_add_test(tc_security, test_bad_offset_just_past_eof);         
+    tcase_add_test(tc_security, test_valid_offset_at_end);              
+    tcase_add_test(tc_security, test_bad_duplicate_data_offsets);       
+    tcase_add_test(tc_security, test_bad_truncated_mid_string_table);   
+    tcase_add_test(tc_security, test_bad_truncated_mid_asset_table);    
     suite_add_tcase(s, tc_security);
 
     /* 4. STRING TABLE: Name validation and pointer logic */
@@ -378,6 +590,7 @@ static Suite *bun_suite(void) {
     tcase_add_test(tc_strings, test_bad_second_asset_empty_name);
     tcase_add_test(tc_strings, test_bad_asset_name_oob);
     tcase_add_test(tc_strings, test_bad_asset_empty_name);
+    tcase_add_test(tc_strings, test_bad_string_no_null_terminator);     
     suite_add_tcase(s, tc_strings);
 
     /* 5. COMPRESSION: RLE specifics and decompression bombs */
@@ -387,6 +600,13 @@ static Suite *bun_suite(void) {
     tcase_add_test(tc_compression, test_bad_rle_truncated);
     suite_add_tcase(s, tc_compression);
 
+    /* 6.  LIFECYCLE: API state safety and cleanup */
+    TCase *tc_lifecycle = tcase_create("\n\nAPI-Lifecycle-Safety");
+    tcase_add_test(tc_lifecycle, test_state_parse_assets_before_header); 
+    tcase_add_test(tc_lifecycle, test_state_double_parse_header);       
+    tcase_add_test(tc_lifecycle, test_lifecycle_double_close);          
+    tcase_add_test(tc_lifecycle, test_lifecycle_close_without_open);     
+    suite_add_tcase(s, tc_lifecycle);
     
 
     return s;
