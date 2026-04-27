@@ -314,6 +314,8 @@ static Suite *bun_suite(void) {
 
     // Note that "TCase" is more like a sub-suite than a single test case
     TCase *tc_header = tcase_create("header-tests");
+
+
     tcase_add_test(tc_header, test_valid_minimal); 
     tcase_add_test(tc_header, test_valid_alt_minimal);
     tcase_add_test(tc_header, test_valid_one_asset);
@@ -340,7 +342,7 @@ static Suite *bun_suite(void) {
 
     
     // TODO: add further test cases and TCases (e.g. "assets", "compression")
-
+    suite_add_tcase(s, tc_header);
     return s;
 }
 
