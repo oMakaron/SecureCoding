@@ -299,7 +299,47 @@ START_TEST(test_bad_rle_truncated) {
 }
 END_TEST
 
+/*
+add
+  1. Integer Boundary & Extremes 
+    tcase_add_test(tc_security, test_bad_asset_count_max);
+    tcase_add_test(tc_security, test_bad_size_overflow);
 
+      2. Offset Edge & Alignment 
+    tcase_add_test(tc_security, test_bad_offset_just_past_eof);
+    tcase_add_test(tc_security, test_valid_offset_at_end);
+
+    3. Empty vs. Minimal Structures 
+    tcase_add_test(tc_valid, test_valid_zero_assets);
+
+      4. String Table Edges 
+    tcase_add_test(tc_strings, test_bad_string_no_null_terminator);
+
+      5. Duplicate / Aliasing Cases 
+    tcase_add_test(tc_security, test_bad_duplicate_data_offsets);
+
+      6. Section Ordering Assumptions 
+    tcase_add_test(tc_valid, test_valid_unordered_layout);
+
+      7. Repeated Parsing / State Safety 
+    tcase_add_test(tc_lifecycle, test_state_parse_assets_before_header);
+    tcase_add_test(tc_lifecycle, test_state_double_parse_header);
+
+    8. Lifecycle Misuse 
+    tcase_add_test(tc_lifecycle, test_lifecycle_double_close);
+    tcase_add_test(tc_lifecycle, test_lifecycle_close_without_open);
+
+    9. Partial / Interrupted Structures 
+    tcase_add_test(tc_security, test_bad_truncated_mid_string_table);
+    tcase_add_test(tc_security, test_bad_truncated_mid_asset_table);
+
+      10. Cross-field Consistency 
+    tcase_add_test(tc_structure, test_bad_header_logic_contradiction);
+    tcase_add_test(tc_structure, test_bad_asset_count_mismatch);
+
+      11. Extreme Valid (Stress Test) 
+    tcase_add_test(tc_valid, test_valid_stress_complex);
+*/
 
 // Assemble a test suite from our tests
 static Suite *bun_suite(void) {
@@ -346,6 +386,8 @@ static Suite *bun_suite(void) {
     tcase_add_test(tc_compression, test_bad_rle_bomb);
     tcase_add_test(tc_compression, test_bad_rle_truncated);
     suite_add_tcase(s, tc_compression);
+
+    
 
     return s;
 }
