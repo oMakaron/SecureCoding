@@ -9,14 +9,14 @@
 //
 
 typedef enum {
-    BUN_OK          = 0,
-    BUN_MALFORMED   = 1,
-    BUN_UNSUPPORTED = 2,
-    BUN_ERR_IO      = 3,   /* I/O error or file not found -- you may define
-                              additional codes in the range 3-10 as needed;
-                              document them in your report */
-    BUN_ERR_INT_OVERFLOW = 4, /* arithmetic overflow while validating
-                                 on-disk metadata */
+    BUN_OK            = 0,  // success
+    BUN_MALFORMED     = 1,  // spec violation
+    BUN_UNSUPPORTED   = 2,  // valid but uses unsupported features
+    BUN_ERR_IO        = 3,  // file not found, read error, seek failure, or other I/O error
+    BUN_ERR_ARGS      = 4,  // wrong number of arguments
+    BUN_ERR_OVERFLOW  = 5,  // integer overflow in offset/size arithmetic
+    BUN_ERR_TOOBIG    = 6,  // value valid per spec but exceeds implementation limits
+    BUN_ERR_ALLOC     = 7,  // memory allocation failure.
 } bun_result_t;
 
 //
@@ -160,7 +160,7 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header);
  * ctx->parsed_asset_count reports how many entries were safely captured before
  * the function returned.
  * Returns BUN_OK, BUN_MALFORMED, BUN_UNSUPPORTED, BUN_ERR_IO, or
- * BUN_ERR_INT_OVERFLOW. On failure, ctx also contains a short diagnostic
+ * BUN_ERR_OVERFLOW. On failure, ctx also contains a short diagnostic
  * message and, where available, the relevant byte offset.
  */
 bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header);
