@@ -12,7 +12,7 @@ LIB     = bun_parse.c
 MAIN    = main.c
 TEST    = tests/test_bun.c
 
-.PHONY: all test sanitized test-sanitize test_valgrind clean
+.PHONY: all test sanitized test-sanitize test-valgrind clean
 
 all: bun_parser
 
@@ -42,7 +42,7 @@ tests/test_runner_sanitized: $(TEST) $(LIB)
 
 # Valgrind: run the plain test runner under Valgrind Memcheck.
 test-valgrind: tests/test_runner
-	$(VALGRIND) $(VALGRIND_FLAGS) ./tests/test_runner
+	CK_FORK=no $(VALGRIND) $(VALGRIND_FLAGS) ./tests/test_runner
 
 clean:
 	rm -f bun_parser tests/test_runner bun_parser_sanitized tests/test_runner_sanitized *.o
