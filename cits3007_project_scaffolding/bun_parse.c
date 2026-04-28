@@ -522,6 +522,84 @@ static bun_result_t validate_rle_data(BunParseContext *ctx,
 }
 
 /**
+ * single record data extraction for uncompressed data
+ * passes the result buffer to result_pointer, a pointer to a u8 buffer.
+*/
+static bun_result_t extract_raw_data(BunParseContext *ctx,
+                                     const BunHeader *header,
+                                     const BunAssetRecord *record,
+                                     u64 record_offset,
+                                     u8 **result_pointer){
+  // Check compression type
+  if (record->compression != BUN_COMPRESSION_NONE){
+    return fail_at(
+      ctx, 
+      BUN_ERR_IO, 
+      "record compression type is not none", 
+      record_offset + BUN_RECORD_COMPRESSION_OFFSET
+    );
+  }
+  
+  // Allocates a result buffer
+  if (record->data_size > (u64) SIZE_MAX){
+    return fail_at(
+      ctx,
+      BUN_ERR_OVERFLOW,
+      "raw data size exceeds size_t",
+      record_offset + BUN_RECORD_UNCOMPRESSED_SIZE_OFFSET
+    );
+  }
+  
+  u8 *result = malloc((size_t) record->data_size);
+  if (result == NULL){
+    return fail_with(
+      ctx,
+      BUN_ERR_IO,
+      "failed to allocate raw data extraction result buffer"
+    );
+  }
+
+  // Finds the data offset in file
+  u64 data_start = 0;
+
+  if(!add_u64_checked(header->data_section_offset, record->data_offset, &data_start)){
+    return fail_at(
+      ctx,
+      BUN_ERR_OVERFLOW,
+      "record data start offset overflows 64-bit arithmetic",
+      record_offset + BUN_RECORD_DATA_OFFSET_OFFSET
+    );
+  }
+
+  // Seek to data start
+  bun_result_t code= seek_to_u64(ctx->file, data_start);
+  if (code != BUN_OK){
+    return fail_at(
+      ctx,
+      code,
+      "failed to seek to raw asset data",
+      data_start
+    );
+  }  
+
+  // Copy the data into the result buffer
+  code = read_exact(ctx->file, result, record->data_size);
+  if (code != BUN_OK){
+    return fail_at(
+      ctx,
+      code,
+      "failed to read raw asset data",
+      data_start
+    );
+  }
+
+  // Pass the result
+  *result_pointer = result;
+
+  return BUN_OK;
+}
+
+/**
  * RLE decompression for data in a single record.
  * outputs the result to result_pointer, a pointer to a result buffer from the caller
  * 
