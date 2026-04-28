@@ -223,7 +223,7 @@ static bun_result_t read_exact(FILE *file, void *buf, size_t size) {
 static int read_asset_record(FILE *file, u64 offset, BunAssetRecord *record) {
   u8 buf[BUN_ASSET_RECORD_SIZE];
 
-  bun_result_t result = BUN_OK;
+  bun_result_t result;
 
   result = seek_to_u64(file, offset);
   if (result != BUN_OK) {
@@ -305,7 +305,7 @@ static bun_result_t validate_asset_name(BunParseContext *ctx,
   u64 name_start = 0;
   u32 prefix_len = 0;
 
-  bun_result_t result = BUN_OK;
+  bun_result_t result;
 
   if (record->name_length == 0) {
     return fail_at(ctx,
@@ -486,8 +486,6 @@ static bun_result_t validate_rle_data(BunParseContext *ctx,
     for (idx = 0; idx < chunk; idx += 2) {
       u8 count = buf[idx];
       u8 value = buf[idx + 1];
-      size_t copies_to_store = 0;
-
       if (count == 0) {
         return fail_at(ctx,
                        BUN_MALFORMED,
@@ -502,7 +500,7 @@ static bun_result_t validate_rle_data(BunParseContext *ctx,
       }
 
       if (parsed->data_prefix_size < BUN_DATA_PREFIX_MAX) {
-        copies_to_store = (size_t)(BUN_DATA_PREFIX_MAX - parsed->data_prefix_size);
+        size_t copies_to_store = (size_t)(BUN_DATA_PREFIX_MAX - parsed->data_prefix_size);
         if (copies_to_store > count) {
           copies_to_store = count;
         }
@@ -663,7 +661,6 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   BunSection data_section = {header->data_section_offset, header->data_section_size};
   u64 file_size = ctx_file_size_u64(ctx);
   u64 asset_table_size = 0;
-  u64 record_offset = 0;
   u32 idx = 0;
   int saw_unsupported = 0;
   const char *unsupported_detail = NULL;
@@ -702,7 +699,6 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
     u64 name_end = 0;
     u64 data_end = 0;
     u32 unsupported_flag_bits = 0;
-    result = BUN_OK;
 
     memset(&parsed_asset, 0, sizeof(parsed_asset));
 
@@ -710,8 +706,8 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
      * Safe after `validate_section_layout()`: the full asset table has already
      * been range-checked against the file size.
      */
-    record_offset = header->asset_table_offset
-                  + (u64)idx * (u64)BUN_ASSET_RECORD_SIZE;
+    u64 record_offset = header->asset_table_offset
+                      + (u64)idx * (u64)BUN_ASSET_RECORD_SIZE;
 
     result = read_asset_record(ctx->file, record_offset, &record);
     if (result != BUN_OK) {
