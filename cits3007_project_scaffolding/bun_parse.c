@@ -555,7 +555,7 @@ static bun_result_t decompress_rle(BunParseContext *ctx,
   if (bytes_needed > (u64) SIZE_MAX){
     return fail_at(
       ctx,
-      BUN_ERR_INT_OVERFLOW,
+      BUN_ERR_OVERFLOW,
       "expected uncompressed file size exceeds size_t",
       record_offset + BUN_RECORD_UNCOMPRESSED_SIZE_OFFSET
     );
@@ -576,7 +576,7 @@ static bun_result_t decompress_rle(BunParseContext *ctx,
   if(!add_u64_checked(header->data_section_offset, record->data_offset, &data_start)){
     return fail_at(
       ctx,
-      BUN_ERR_INT_OVERFLOW,
+      BUN_ERR_OVERFLOW,
       "record data start offset overflows 64-bit arithmetic",
       record_offset + BUN_RECORD_DATA_OFFSET_OFFSET
     );
