@@ -23,6 +23,7 @@ def write_asset_record(f, name_off, name_len, data_off, data_size):
     data = struct.pack(_RECORD_FMT, name_off, name_len, data_off, data_size, 0, 0, 0, 0, 0)
     f.write(data)
 
+
 # --- Generator Functions  ---
 def make_valid_suite():
 
@@ -39,8 +40,8 @@ def make_valid_suite():
         # Everything stays aligned to 4-byte boundaries
         a_off = _align4(HEADER_SIZE)
 
-        # Always advance at least 4 bytes between sections
-        s_off = _align4(a_off + max(asset_table_size, 4))
+    
+        s_off = _align4(a_off + asset_table_size)
 
         d_off = _align4(s_off + str_size)
 
@@ -75,32 +76,63 @@ def make_valid_suite():
 
         # Write asset record
         f.seek(a_off)
-        f.write(b"\x00" * (s_off - a_off))
-        write_asset_record(f, 0, 4, 0, 4)
+        write_asset_record(f, 0, len(str_data) - 1, 0, 4)
 
     out = Path("tests/samples/valid/09-stress-test.bun")
     with open(out, "wb") as f:
-        d_off = HEADER_SIZE + RECORD_SIZE + 8  # after string table
-        str_data = b"long\x00"
-        str_size = _align4(len(str_data))  # 8
+        asset_count = 100
 
-        s_off = HEADER_SIZE + RECORD_SIZE
-        a_off = HEADER_SIZE
+    # 1. String table
+        str_data = b"stress_asset\x00"
+        name_len = len(str_data) - 1  # exclude null
+        str_size = _align4(len(str_data))
 
-        write_header(f, 1, a_off, s_off, str_size, d_off, 4)
+        # 2. Sizes
+        asset_table_size = asset_count * RECORD_SIZE
 
-        # Asset table
+        # 3. Layout
+        a_off = _align4(HEADER_SIZE)
+        s_off = _align4(a_off + asset_table_size)
+        d_off = _align4(s_off + str_size)
+
+        # Make data section big enough for ALL assets (better stress test)
+        data_size = 4 * asset_count
+
+        # 4. Header
+        write_header(f, asset_count, a_off, s_off, str_size, d_off, data_size)
+
+        # 5. Asset table
         f.seek(a_off)
-        write_asset_record(f, 0, 4, 0, 4)
+        for i in range(asset_count):
+            write_asset_record(
+                f,
+                0,
+                name_len,
+                i * 4,   # each asset has unique offset
+                4
+            )
 
-        # String table
+        # 6. String table
         f.seek(s_off)
-        f.write(str_data)
-        f.write(b"\x00" * (str_size - len(str_data)))
+        f.write(str_data.ljust(str_size, b'\x00'))
 
-        # Data section
+        # 7. Data section
         f.seek(d_off)
-        f.write(b"DATA")
+        for i in range(asset_count):
+            f.write(b"DATA")
+
+ 
+    with open("tests/samples/valid/10-offset-at-eof.bun", "wb") as f:
+        a_off = HEADER_SIZE
+        s_off = HEADER_SIZE + RECORD_SIZE   # EOF after asset table
+        d_off = s_off                       # same position
+
+        # Header: string + data sections are size 0
+        write_header(f, 1, a_off, s_off, 0, d_off, 0)
+
+        
+        f.seek(a_off)
+        write_asset_record(f, 0, 0, 0, 0)
 
 def make_invalid_suite():
     # 17: Misaligned Section Size (Size not multiple of 4)
@@ -118,13 +150,14 @@ def make_invalid_suite():
     out = Path("tests/samples/invalid/19-asset-count-mismatch.bun")
     with open(out, "wb") as f:
         write_header(f, 2, HEADER_SIZE, HEADER_SIZE + (RECORD_SIZE * 2), 4, HEADER_SIZE + (RECORD_SIZE * 2) + 4, 4)
-        write_asset_record(f, 0, 4, 0, 4) # Only writing one record
+        str_data = b"test\x00"
+        name_len = len(str_data) - 1
+        write_asset_record(f, 0, name_len, 0, 4)
 
     # 20-27: Existing security/stress cases
     make_asset_count_max()
     make_size_overflow()
     make_offset_past_eof()
-    make_offset_at_eof()
     make_duplicate_offsets()
     make_trunc_string()
     make_trunc_asset_record()
@@ -133,7 +166,15 @@ def make_invalid_suite():
 # --- Helper wrappers for 20-27 ---
 def make_asset_count_max():
     with open("tests/samples/invalid/20-asset-count-max.bun", "wb") as f:
-        write_header(f, 0xFFFFFFFF, HEADER_SIZE, HEADER_SIZE+4, 4, HEADER_SIZE+8, 4)
+        write_header(
+            f,
+            0xFFFFFFFF,
+            HEADER_SIZE,
+            HEADER_SIZE + RECORD_SIZE,
+            4,
+            HEADER_SIZE + RECORD_SIZE + 4,
+            4
+        )
 
 def make_size_overflow():
     with open("tests/samples/invalid/21-size-overflow.bun", "wb") as f:
@@ -143,9 +184,11 @@ def make_offset_past_eof():
     with open("tests/samples/invalid/22-offset-past-eof.bun", "wb") as f:
         write_header(f, 1, HEADER_SIZE, 200, 4, 300, 4)
 
-def make_offset_at_eof():
-    with open("tests/samples/invalid/23-offset-at-eof.bun", "wb") as f: # Spec says valid, but often tested as invalid logic
-        write_header(f, 1, HEADER_SIZE, HEADER_SIZE+RECORD_SIZE, 0, HEADER_SIZE+RECORD_SIZE, 0)
+        # Write minimal valid asset table so parser gets further
+        f.seek(HEADER_SIZE)
+        write_asset_record(f, 0, 4, 0, 4)
+
+# MOVED INVALID 23 TO VALID 10
 
 def make_duplicate_offsets():
     with open("tests/samples/invalid/24-duplicate-offsets.bun", "wb") as f:
