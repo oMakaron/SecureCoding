@@ -538,7 +538,7 @@ static bun_result_t decompress_rle(BunParseContext *ctx,
   if (record->compression != BUN_COMPRESSION_RLE){
     return fail_at(
       ctx,
-      BUN_ERR_IO,
+      BUN_MALFORMED,
       "record compression type is not RLE",
       record_offset + BUN_RECORD_COMPRESSION_OFFSET
     );
