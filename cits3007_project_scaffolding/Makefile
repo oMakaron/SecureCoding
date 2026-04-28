@@ -30,4 +30,4 @@ tests/test_runner: $(TEST) $(LIB)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $$(pkg-config --cflags --libs check)
 
 clean:
-	-rm bun_parser tests/test_runner *.o
+	rm -f bun_parser tests/test_runner *.o
