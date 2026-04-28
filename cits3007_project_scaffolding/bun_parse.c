@@ -534,7 +534,6 @@ static bun_result_t decompress_rle(BunParseContext *ctx,
                                    const BunAssetRecord *record,
                                    u64 record_offset,
                                    u8 **result_pointer) {
-
   // Check if record is RLE compressed
   if (record->compression != BUN_COMPRESSION_RLE){
     return fail_at(
