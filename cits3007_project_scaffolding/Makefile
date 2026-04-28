@@ -41,7 +41,7 @@ tests/test_runner_sanitized: $(TEST) $(LIB)
 	$(CC) $(CFLAGS) $(SANITIZE_FLAGS) $(LDFLAGS) -o $@ $^ $$(pkg-config --cflags --libs check)
 
 # Valgrind: run the plain test runner under Valgrind Memcheck.
-test_valgrind: tests/test_runner
+test-valgrind: tests/test_runner
 	$(VALGRIND) $(VALGRIND_FLAGS) ./tests/test_runner
 
 clean:
