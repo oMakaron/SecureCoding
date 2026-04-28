@@ -585,7 +585,7 @@ static bun_result_t decompress_rle(BunParseContext *ctx,
   if (code != BUN_OK){
     return fail_at(
       ctx,
-      BUN_ERR_IO,
+      code,
       "failed to seek to RLE asset data",
       data_start
     );
@@ -600,7 +600,7 @@ static bun_result_t decompress_rle(BunParseContext *ctx,
     if (code != BUN_OK){
       return fail_at(
         ctx,
-        BUN_ERR_IO,
+        code,
         "failed to read RLE asset data",
         data_start + (record->data_size - remaining)
       );
