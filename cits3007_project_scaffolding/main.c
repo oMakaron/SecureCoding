@@ -13,6 +13,8 @@ static const char *result_summary(bun_result_t result) {
       return "unsupported BUN feature";
     case BUN_ERR_IO:
       return "I/O error (file not found, read failure, or seek failure)";
+    case BUN_ERR_ARGS:
+      return "invalid command-line arguments";
     case BUN_ERR_OVERFLOW:
       return "integer overflow while validating metadata";
     case BUN_ERR_TOOBIG:

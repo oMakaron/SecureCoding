@@ -156,9 +156,9 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header);
 
 /**
  * Parse and validate all asset records. Called after bun_parse_header().
- * Parsed records/previews are written into ctx->assets, and
- * ctx->parsed_asset_count reports how many entries were safely captured before
- * the function returned.
+ * Parsed records/previews are passed to ctx->asset_callback when one is set,
+ * and ctx->parsed_asset_count reports how many entries were safely processed
+ * before the function returned.
  * Returns BUN_OK, BUN_MALFORMED, BUN_UNSUPPORTED, BUN_ERR_IO, or
  * BUN_ERR_OVERFLOW. On failure, ctx also contains a short diagnostic
  * message and, where available, the relevant byte offset.

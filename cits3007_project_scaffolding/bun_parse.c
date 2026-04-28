@@ -190,7 +190,7 @@ static int sections_overlap(const BunSection *lhs, const BunSection *rhs) {
 }
 
 /*
- * Return 1 if `file` can be positioned at `offset`, otherwise 0.
+ * Return BUN_OK if `file` can be positioned at `offset`.
  */
 static bun_result_t seek_to_u64(FILE *file, u64 offset) {
   if (offset > (u64)LONG_MAX) {
@@ -203,8 +203,7 @@ static bun_result_t seek_to_u64(FILE *file, u64 offset) {
 }
 
 /*
- * Return 1 after reading exactly `size` bytes into `buf`; return 0 on short
- * read or any I/O error.
+ * Read exactly `size` bytes into `buf`.
  */
 static bun_result_t read_exact(FILE *file, void *buf, size_t size) {
   if (fread(buf, 1, size, file) == size) {
@@ -217,10 +216,9 @@ static bun_result_t read_exact(FILE *file, void *buf, size_t size) {
 }
 
 /*
- * Read one on-disk asset record from `offset` into `record`. Returns 1 on
- * success or 0 if seeking/reading fails.
+ * Read one on-disk asset record from `offset` into `record`.
  */
-static int read_asset_record(FILE *file, u64 offset, BunAssetRecord *record) {
+static bun_result_t read_asset_record(FILE *file, u64 offset, BunAssetRecord *record) {
   u8 buf[BUN_ASSET_RECORD_SIZE];
 
   bun_result_t result;
@@ -256,8 +254,6 @@ static void reset_parsed_assets(BunParseContext *ctx) {
   ctx->asset_callback = NULL;
   ctx->callback_userdata = NULL;
 }
-
-/* CHANGES: assets are now processed one-by-one via callback */
 
 /*
  * Validate that the header, asset table, string table, and data section all
@@ -568,10 +564,7 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
 
   clear_error_state(ctx);
 
-  // our file is far too short, and cannot be valid!
-  // (query: how do we let `main` know that "file was too short"
-  // was the exact problem? Where can we put details about the
-  // exact validation problem that occurred?)
+  // Our file is far too short, and cannot be valid.
   if (ctx->file_size < (long)BUN_HEADER_SIZE) {
     return fail_at(ctx,
                    BUN_MALFORMED,
