@@ -586,7 +586,8 @@ static bun_result_t decompress_rle(BunParseContext *ctx,
   u8 buf[512];
   u64 remaining = record->data_size;
 
-  if (!seek_to_u64(ctx->file, data_start)){
+  bun_result_t code= seek_to_u64(ctx->file, data_start);
+  if (code != BUN_OK){
     return fail_at(
       ctx,
       BUN_ERR_IO,
@@ -600,7 +601,8 @@ static bun_result_t decompress_rle(BunParseContext *ctx,
   while (remaining > 0){
     size_t chunk = remaining < sizeof(buf) ? (size_t)remaining : sizeof(buf);
 
-    if (!read_exact(ctx->file, buf, chunk)){
+    code = read_exact(ctx->file, buf, chunk);
+    if (code != BUN_OK){
       return fail_at(
         ctx,
         BUN_ERR_IO,
