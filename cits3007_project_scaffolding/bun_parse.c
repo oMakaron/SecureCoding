@@ -746,13 +746,25 @@ static bun_result_t crc_check(BunParseContext *ctx,
 
   // Data extraction and decompression
   u8 *data;
+  bun_result_t code;
 
   switch (record->compression){
     case BUN_COMPRESSION_NONE:
+      code = extract_raw_data(ctx, header, record, record_offset, &data);
+      if (code != BUN_OK) return code;
       break;
     case BUN_COMPRESSION_RLE:
+      code = decompress_rle(ctx, header, record, record_offset, &data);
+      if (code != BUN_OK) return code;
       break;
     case BUN_COMPRESSION_ZLIB:
+      // Unsupported for now
+      return fail_at(
+        ctx,
+        BUN_UNSUPPORTED,
+        "ZLIB compression unsupported",
+        record_offset + BUN_RECORD_COMPRESSION_OFFSET
+      );
       break;
   }
 
