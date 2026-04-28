@@ -370,7 +370,7 @@ START_TEST(test_valid_offset_at_end) {
     BunParseContext ctx = {0};
     BunHeader header = {0};
     // An empty section pointing exactly to the end of the file is technically valid.
-    ck_assert_int_eq(bun_open(fixture("valid/23-offset-at-eof.bun"), &ctx), BUN_OK);
+    ck_assert_int_eq(bun_open(fixture("valid/10-offset-at-eof.bun"), &ctx), BUN_OK);
     ck_assert_int_eq(bun_parse_header(&ctx, &header), BUN_OK);
     bun_close(&ctx);
 } END_TEST
