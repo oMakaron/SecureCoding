@@ -526,13 +526,8 @@ static bun_result_t validate_rle_data(BunParseContext *ctx,
  * outputs the result to result_pointer, a pointer to a result buffer from the caller
  * 
  * note:
- * this method won't be checking the validity of parsed record data
+ * this method won't be checking the validity of parsed record data.
  * it is advised to call this method after calling validate_rle_data
- * 
- * dev note:
- * alternatively we could migrate the RLE check here 
- * or create a dedicated function for it instead of combining it with preview generator.
- * Although the first option could only be implemented if we were to use this function
 */
 static bun_result_t decompress_rle(BunParseContext *ctx, 
                                    const BunHeader *header,
