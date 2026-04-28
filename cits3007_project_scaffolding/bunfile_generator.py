@@ -24,31 +24,83 @@ def write_asset_record(f, name_off, name_len, data_off, data_size):
     f.write(data)
 
 # --- Generator Functions  ---
-
 def make_valid_suite():
-    # 07: Zero Assets (Valid according to spec, count is just 0)
+
     out = Path("tests/samples/valid/07-zero-assets.bun")
     with open(out, "wb") as f:
-        write_header(f, 0, HEADER_SIZE, HEADER_SIZE, 0, HEADER_SIZE, 0)
-    
-    # 08: Unordered (Sections appear in non-canonical order)
+        # 1. Configuration
+        asset_count = 0
+        asset_table_size = 0  # 0 * RECORD_SIZE
+        
+        str_data = b"empty\x00"
+        str_size = _align4(len(str_data))
+        
+        # 2. Sequential Offset Stacking
+        # Everything stays aligned to 4-byte boundaries
+        a_off = _align4(HEADER_SIZE)
+
+        # Always advance at least 4 bytes between sections
+        s_off = _align4(a_off + max(asset_table_size, 4))
+
+        d_off = _align4(s_off + str_size)
+
+        # 3. Write the Header
+        # Note: data_section_size is 0 here just to make it a truly "empty" container
+        write_header(f, asset_count, a_off, s_off, str_size, d_off, 0)
+
+        # 4. Write String Table (since there are no assets to write)
+        f.seek(s_off)
+        f.write(str_data.ljust(str_size, b'\x00'))
+
     out = Path("tests/samples/valid/08-unordered.bun")
     with open(out, "wb") as f:
         d_off = HEADER_SIZE
-        s_off = d_off + 4
-        a_off = _align4(s_off + 5)
-        write_header(f, 1, a_off, s_off, 5, d_off, 4)
-        f.seek(d_off); f.write(b"DATA")
-        f.seek(s_off); f.write(b"test\x00")
-        f.seek(a_off); write_asset_record(f, 0, 5, 0, 4)
 
-    # 09: Stress Test (Large valid file or complex structure)
+        str_data = b"test\x00"
+        str_size = _align4(len(str_data))  # → 8
+
+        s_off = d_off + 4
+        a_off = _align4(s_off + str_size)
+
+        write_header(f, 1, a_off, s_off, str_size, d_off, 4)
+
+        # Write data section
+        f.seek(d_off)
+        f.write(b"DATA")
+
+        # Write string table
+        f.seek(s_off)
+        f.write(str_data)
+        f.write(b"\x00" * (str_size - len(str_data)))  # padding
+
+        # Write asset record
+        f.seek(a_off)
+        f.write(b"\x00" * (s_off - a_off))
+        write_asset_record(f, 0, 4, 0, 4)
+
     out = Path("tests/samples/valid/09-stress-test.bun")
     with open(out, "wb") as f:
-        write_header(f, 1, HEADER_SIZE, HEADER_SIZE + RECORD_SIZE, 5, HEADER_SIZE + RECORD_SIZE + 8, 4)
-        write_asset_record(f, 0, 5, 0, 4)
-        f.seek(HEADER_SIZE + RECORD_SIZE); f.write(b"long\x00")
-        f.seek(HEADER_SIZE + RECORD_SIZE + 8); f.write(b"DATA")
+        d_off = HEADER_SIZE + RECORD_SIZE + 8  # after string table
+        str_data = b"long\x00"
+        str_size = _align4(len(str_data))  # 8
+
+        s_off = HEADER_SIZE + RECORD_SIZE
+        a_off = HEADER_SIZE
+
+        write_header(f, 1, a_off, s_off, str_size, d_off, 4)
+
+        # Asset table
+        f.seek(a_off)
+        write_asset_record(f, 0, 4, 0, 4)
+
+        # String table
+        f.seek(s_off)
+        f.write(str_data)
+        f.write(b"\x00" * (str_size - len(str_data)))
+
+        # Data section
+        f.seek(d_off)
+        f.write(b"DATA")
 
 def make_invalid_suite():
     # 17: Misaligned Section Size (Size not multiple of 4)
@@ -111,10 +163,31 @@ def make_trunc_asset_record():
 
 def make_non_null_terminated():
     with open("tests/samples/invalid/27-non-null-terminated.bun", "wb") as f:
-        s_off = HEADER_SIZE+RECORD_SIZE
-        write_header(f, 1, HEADER_SIZE, s_off, 6, s_off+8, 4)
-        f.seek(HEADER_SIZE); write_asset_record(f, 0, 6, 0, 4)
-        f.seek(s_off); f.write(b"DANGER")
+        # Layout:
+        # [Header][Asset Table][String Table][Data]
+
+        a_off = HEADER_SIZE
+        s_off = HEADER_SIZE + RECORD_SIZE
+
+        str_data = b"DANG"          # only 4 bytes in string table
+        str_size = 4                # MUST be aligned → 4 is OK
+
+        d_off = s_off + str_size    # data section after string table
+
+        # Header claims string table is ONLY 4 bytes
+        write_header(f, 1, a_off, s_off, str_size, d_off, 4)
+
+        # Asset record claims name is 6 bytes → OUT OF BOUNDS
+        f.seek(a_off)
+        write_asset_record(f, 0, 6, 0, 4)
+
+        # Write actual string table (only 4 bytes exist)
+        f.seek(s_off)
+        f.write(str_data)
+
+        # Write data section (just to keep file structurally complete)
+        f.seek(d_off)
+        f.write(b"DATA")
 
 def main():
     Path("tests/samples/valid").mkdir(parents=True, exist_ok=True)
