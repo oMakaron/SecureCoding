@@ -1030,12 +1030,8 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
                        record_offset + BUN_RECORD_FLAGS_OFFSET);
     }
     if (record.checksum != 0u) {
-      saw_unsupported = 1;
-      note_first_issue(&unsupported_detail,
-                       &unsupported_offset,
-                       &unsupported_offset_valid,
-                       "non-zero asset checksum is not supported",
-                       record_offset + BUN_RECORD_CHECKSUM_OFFSET);
+      result = crc_check(ctx, header, &record, record_offset);
+      if (result != BUN_OK) return result;
     }
 
     if (record.compression == BUN_COMPRESSION_NONE) {
