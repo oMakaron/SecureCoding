@@ -792,6 +792,10 @@ static bun_result_t crc_check(BunParseContext *ctx,
     );
   }
 
+  // Free allocated data buffer
+  free(data);
+  data = NULL;
+
   return BUN_OK;
 }
 
