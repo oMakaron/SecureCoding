@@ -63,6 +63,8 @@ enum {
   BUN_RECORD_FLAGS_OFFSET = 44u
 };
 
+static u32 CRC_table[256];
+
 /*
  * Clear any previously recorded parser error details in `ctx`.
  */
@@ -700,6 +702,103 @@ static bun_result_t decompress_rle(BunParseContext *ctx,
   return BUN_OK;
 }
 
+/**
+ * populate CRC table
+ * Credit to wikipedia for the code snippet
+ * https://en.wikipedia.org/wiki/Computation_of_cyclic_redundancy_checks#CRC-32_example
+*/
+static void populate_crc_table(){
+	uint32_t crc32 = 1;
+
+	for (unsigned int i = 128; i; i >>= 1) {
+		crc32 = (crc32 >> 1) ^ (crc32 & 1 ? 0xedb88320 : 0);
+		for (unsigned int j = 0; j < 256; j += 2*i)
+        	CRC_table[i + j] = crc32 ^ CRC_table[j];
+	}
+}
+
+/**
+ * CRC check for a single record
+ * returns BUN_OK if data is valid, BUN_MALFORMED if the check failed
+ * 
+ * note:
+ * it is suggested to use the function validate_rle_data before using this function.
+ * see note in decompress_rle.
+*/
+static bun_result_t crc_check(BunParseContext *ctx,
+                              const BunHeader *header,
+                              const BunAssetRecord *record,
+                              u64 record_offset){
+  // No CRC, returns OK
+  if (record->checksum == 0u){
+    return BUN_OK;
+  }
+
+  // Data extraction and decompression
+  u8 *data;
+  bun_result_t code;
+
+  switch (record->compression){
+    case BUN_COMPRESSION_NONE:
+      code = extract_raw_data(ctx, header, record, record_offset, &data);
+      if (code != BUN_OK) return code;
+      break;
+    case BUN_COMPRESSION_RLE:
+      code = decompress_rle(ctx, header, record, record_offset, &data);
+      if (code != BUN_OK) return code;
+      break;
+    case BUN_COMPRESSION_ZLIB:
+      // Unsupported for now
+      return fail_at(
+        ctx,
+        BUN_UNSUPPORTED,
+        "ZLIB compression unsupported",
+        record_offset + BUN_RECORD_COMPRESSION_OFFSET
+      );
+      break;
+  }
+
+  // Create CRC table if haven't yet
+  if (CRC_table[255] == 0){
+    populate_crc_table();
+  }
+
+  // CRC 32 Algorithm
+  u32 crc32 = 0xFFFFFFFFu;
+
+  if (record->data_size > (u64) SIZE_MAX){
+    return fail_at(
+      ctx,
+      BUN_ERR_OVERFLOW,
+      "data size exceeds size_t",
+      record_offset + BUN_RECORD_DATA_SIZE_OFFSET
+    );
+  }
+
+  for (size_t i = 0; i < (size_t)record->data_size; i++) { 
+		crc32 ^= data[i];
+		crc32 = (crc32 >> 8) ^ CRC_table[crc32 & 0xFF];
+	}
+
+  crc32 ^= 0xFFFFFFFFu;
+
+  // Compare checksum
+  if (crc32 != record->checksum){
+    return fail_at(
+      ctx, 
+      BUN_MALFORMED, 
+      "CRC check failed", 
+      record_offset + BUN_RECORD_CHECKSUM_OFFSET
+    );
+  }
+
+  // Free allocated data buffer
+  free(data);
+  data = NULL;
+
+  return BUN_OK;
+}
+
 //
 // API implementation
 //
@@ -931,12 +1030,8 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
                        record_offset + BUN_RECORD_FLAGS_OFFSET);
     }
     if (record.checksum != 0u) {
-      saw_unsupported = 1;
-      note_first_issue(&unsupported_detail,
-                       &unsupported_offset,
-                       &unsupported_offset_valid,
-                       "non-zero asset checksum is not supported",
-                       record_offset + BUN_RECORD_CHECKSUM_OFFSET);
+      result = crc_check(ctx, header, &record, record_offset);
+      if (result != BUN_OK) return result;
     }
 
     if (record.compression == BUN_COMPRESSION_NONE) {
