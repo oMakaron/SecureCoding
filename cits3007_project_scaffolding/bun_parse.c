@@ -734,16 +734,6 @@ static bun_result_t crc_check(BunParseContext *ctx,
     return BUN_OK;
   }
 
-  // Flags check
-  if (record->flags != BUN_FLAG_ENCRYPTED || record->flags != BUN_FLAG_EXECUTABLE){
-    return fail_at(
-      ctx, 
-      BUN_UNSUPPORTED, 
-      "Unsupported content flag", 
-      record_offset+BUN_RECORD_FLAGS_OFFSET
-    );
-  }
-
   // Data extraction and decompression
   u8 *data;
   bun_result_t code;
